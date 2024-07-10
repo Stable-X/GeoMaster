@@ -66,9 +66,9 @@ Additionally, you should have a reconstructed coarse mesh available.
 
 ## Run GeoMaster
 
-To enhance the geometric detail of your 3D model using GeoMaster, use the `hloc-process-data` command as follows:
+To enhance the geometric detail of your 3D model using GeoMaster, use the `gm-process` command as follows:
 ```bash
-hloc-process-data -s ${INPUT_DIR} -m ${MODEL_DIR}/${MODEL_NAME}.ply
+gm-process -s ${INPUT_DIR} -m ${MODEL_DIR}/${MODEL_NAME}.ply
 ```
 Replace `${INPUT_DIR}` with the path to your input data directory, `${MODEL_DIR}` with the path to your model directory, and `${MODEL_NAME}` with the name of your model file.
 
@@ -80,27 +80,22 @@ Here is an example of how to run the pipeline:
 
 ### Data Preparation Example
 ```
-project/
-    data_001/
+examples/
+    glt/
         images/
         mask/
         sparse/
-    data_002/
-        images/
-        mask/
-        sparse/
-    coarse_mesh/
-        mesh.ply
+    glt.ply
 ```
 
 ### Running GeoMaster
 ```bash
-hloc-process-data -s project/data_001/ -m project/coarse_mesh/mesh.ply
+gm-process -s examples/glt/ -m examples/glt.ply
 ```
 
 After the command executes, the refined model will be available at:
 ```
-project/coarse_mesh/mesh.refined.ply
+examples/glt.refined.ply
 ```
 
 ## Contribution
