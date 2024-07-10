@@ -187,9 +187,9 @@ def main(source_path, model_path, output_path, sap_res, sig, num_points, num_sam
             np_faces = faces.squeeze(0).detach().cpu().long().numpy()
             save_mesh = trimesh.Trimesh(save_verts, np_faces, process=False, maintain_order=True)
             
-            save_mesh.export(join("results", os.path.basename(model_path)))
+            save_mesh.export(output_path)
 
-            inputs, center, scale = gen_inputs(join("results", os.path.basename(model_path)), num_sample)
+            inputs, center, scale = gen_inputs(output_path, num_sample)
             inputs = inputs.cuda()
             inputs.requires_grad_(True)
             center = center.cuda()
