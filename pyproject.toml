@@ -1,0 +1,21 @@
+# pyproject.toml
+[project]
+name = "GeoMaster"
+version = "0.1.0"
+description = '''
+Advanced Geometry Enhancement for High-Resolution 3D Modeling
+'''
+
+[build-system]
+requires = [
+    "setuptools>=42",
+    "click",
+    "tqdm"
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+exclude = ["tests*"]
+
+[project.scripts]
+gm-process = "geomaster.pipeline:main"

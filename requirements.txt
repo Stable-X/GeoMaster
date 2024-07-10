@@ -1,0 +1,12 @@
+tqdm
+click
+setuptools>=42
+numpy
+opencv-python
+scipy
+scikit-image
+trimesh
+argparse
+pyhocon
+plyfile
+typing_extensions
