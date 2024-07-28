@@ -67,8 +67,8 @@ def prepare_data(source_path, resolution=None):
 @click.option('--ncc_thresh', default=0.5, type=float, help='NCC threshold')
 @click.option('--lr', default=0.1, type=float, help='Learning rate')
 @click.option('--ncc_weight', default=0.15, type=float, help='NCC weight')
-@click.option('--normal_weight', default=0.1, type=float, help='NCC weight')
-@click.option('--mask_weight', default=2, type=float, help='Mask weight')
+@click.option('--normal_weight', default=0.05, type=float, help='NCC weight')
+@click.option('--mask_weight', default=0., type=float, help='Mask weight')
 @click.option('--atol', default=0.01, type=float, help='Tolerance level for alignment')
 def main(source_path, model_path, output_path, num_points, num_sample, h_patch_size, ncc_thresh, lr, ncc_weight, normal_weight, mask_weight, atol):
     if output_path is None:
