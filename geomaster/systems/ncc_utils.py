@@ -34,6 +34,46 @@ def NCC(ref, src, ref_valid_mask, src_valid_mask):
 
     return ncc.squeeze()
 
+def SSIM(ref, src, ref_valid_mask, src_valid_mask):
+    '''
+    ref: tensor of shape (1, npoints, npixels)
+    src: tensor of shape (nviews, npoints, npixels)
+    ref_valid_mask: tensor of shape (1, npoints, npixels)
+    src_valid_mask: tensor of shape (nviews, npoints, npixels)
+    
+    return: tensor of shape (nviews, npoints)
+    '''
+    C1 = 0.01**2
+    C2 = 0.03**2
+
+    nviews = src.shape[0]
+
+    # Calculate the number of valid pixels
+    src_valid_num = torch.sum(src_valid_mask, dim=2, keepdim=True)
+    src_valid_num[src_valid_num == 0] = 1
+
+    # Expand reference to match src dimensions
+    ref_expanded = ref.expand(nviews, -1, -1)
+
+    # Compute means
+    ref_mean = torch.sum(ref_expanded * src_valid_mask, dim=2, keepdim=True) / src_valid_num
+    src_mean = torch.sum(src * src_valid_mask, dim=2, keepdim=True) / src_valid_num
+
+    # Compute variances
+    ref_var = torch.sum(((ref_expanded - ref_mean) * src_valid_mask).square(), dim=2, keepdim=True) / src_valid_num
+    src_var = torch.sum(((src - src_mean) * src_valid_mask).square(), dim=2, keepdim=True) / src_valid_num
+
+    # Compute covariances
+    covar = torch.sum((ref_expanded - ref_mean) * (src - src_mean) * src_valid_mask, dim=2, keepdim=True) / src_valid_num
+
+    # SSIM computation
+    ssim_numerator = (2 * ref_mean * src_mean + C1) * (2 * covar + C2)
+    ssim_denominator = (ref_mean.square() + src_mean.square() + C1) * (ref_var + src_var + C2)
+
+    ssim_map = ssim_numerator / ssim_denominator
+
+    return ssim_map.squeeze()
+
 def normalize(flow, h, w, clamp=None):
     # either h and w are simple float or N torch.tensor where N batch size
     try:
