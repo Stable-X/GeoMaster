@@ -46,8 +46,8 @@ def prepare_data(source_path, resolution=None):
             _normal_mask = ~((_normal_norm > 1.1) | (_normal_norm < 0.9))
             _normal = _normal / _normal_norm            
         else:
-            _normal = torch.zeros_like(imgs[0]).cuda()
-            _normal_mask = torch.ones_like(imgs[0][:, :, 0]).cuda().bool()
+            _normal = torch.zeros_like(imgs[0]).cuda().permute(1, 2, 0)
+            _normal_mask = torch.zeros_like(imgs[0][0:1]).cuda().permute(1, 2, 0)
         _normal = torch.cat([_normal, _normal_mask], dim=2)
         normals.append(_normal)
     normals = torch.stack(normals, dim=0).cuda().contiguous()
