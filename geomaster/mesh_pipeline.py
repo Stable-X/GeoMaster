@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Adam
 import nvdiffrast.torch as dr
-from geomaster.systems.ncc_utils import build_patch_offset, NCC, SSIM
+from geomaster.systems.ncc_utils import build_patch_offset, NCC
 from geomaster.models.mesh import MeshOptimizer, gen_inputs, clean_mesh
 import click
 from gaustudio import datasets
@@ -42,12 +42,10 @@ def prepare_data(source_path, resolution=None):
 @click.option('--h_patch_size', default=5, type=int, help='Patch size')
 @click.option('--ncc_thresh', default=0.5, type=float, help='NCC threshold')
 @click.option('--lr', default=0.1, type=float, help='Learning rate')
-@click.option('--rgb_ncc', default=False, type=bool, help='RGB NCC flag')
-@click.option('--use_sparse', default=False, type=bool, help='Use sparse flag')
 @click.option('--ncc_weight', default=0.15, type=float, help='NCC weight')
 @click.option('--mask_weight', default=20, type=float, help='Mask weight')
 @click.option('--atol', default=0.01, type=float, help='Tolerance level for alignment')
-def main(source_path, model_path, output_path, num_points, num_sample, h_patch_size, ncc_thresh, lr, rgb_ncc, use_sparse, ncc_weight, mask_weight, atol):
+def main(source_path, model_path, output_path, num_points, num_sample, h_patch_size, ncc_thresh, lr, ncc_weight, mask_weight, atol):
     if output_path is None:
         output_path = model_path[:-4]+'.refined.ply'
     elif os.path.isdir(output_path):
@@ -141,19 +139,10 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
 
             src_valid_mask = ref_valid_mask & torch.isclose(sampled_src_depth, src_depth, atol=atol) & (sampled_src_mask>0)
 
-            if rgb_ncc:
-                sampled_ref_img = ref_img[:, vv,uu].reshape(npoints, num_pixels, 3).permute(2,0,1).contiguous()
-                sampled_src_img = F.grid_sample(src_img.contiguous(), grid.view(n-1, -1, 1, 2), align_corners=False).squeeze()
-                sampled_src_img = sampled_src_img.reshape(n-1, 3, npoints, num_pixels)
-                ncc_values = 0
-                for j in range(3):
-                    ncc_values = ncc_values + SSIM(sampled_ref_img[j:j+1], sampled_src_img[:,j], ref_valid_mask, src_valid_mask)
-                ncc_values = ncc_values / 3
-            else:
-                sampled_ref_gray = ref_gray[:, vv, uu].reshape(1, npoints, num_pixels)
-                sampled_src_gray = F.grid_sample(src_gray.unsqueeze(1), grid.view(n-1, -1, 1, 2), align_corners=False).squeeze()
-                sampled_src_gray = sampled_src_gray.reshape(n-1, npoints, num_pixels)
-                ncc_values = SSIM(sampled_ref_gray, sampled_src_gray, ref_valid_mask, src_valid_mask) # nview npoints
+            sampled_ref_gray = ref_gray[:, vv, uu].reshape(1, npoints, num_pixels)
+            sampled_src_gray = F.grid_sample(src_gray.unsqueeze(1), grid.view(n-1, -1, 1, 2), align_corners=False).squeeze()
+            sampled_src_gray = sampled_src_gray.reshape(n-1, npoints, num_pixels)
+            ncc_values = NCC(sampled_ref_gray, sampled_src_gray, ref_valid_mask, src_valid_mask) # nview npoints
 
             ncc_mask = (ncc_values > ncc_thresh) & (src_valid_mask.sum(2) > num_pixels*0.75)
 
