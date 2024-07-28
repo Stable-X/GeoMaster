@@ -64,7 +64,7 @@ def prepare_data(source_path, resolution=None):
 @click.option('--sap_res', default=256, type=int, help='SAP resolution')
 @click.option('--sig', default=2, type=int, help='Sigma value')
 @click.option('--num_points', default=30000, type=int, help='Number of points')
-@click.option('--num_sample', default=500000, type=int, help='Number of samples')
+@click.option('--num_sample', default=50000, type=int, help='Number of samples')
 @click.option('--h_patch_size', default=5, type=int, help='Patch size')
 @click.option('--ncc_thresh', default=0.5, type=float, help='NCC threshold')
 @click.option('--lr', default=0.001, type=float, help='Learning rate')
@@ -101,8 +101,8 @@ def main(source_path, model_path, output_path, sap_res, sig, num_points, num_sam
 
     inputs.requires_grad_(True)
     inputs_optimizer = Adam([{'params': inputs, 'lr': lr}])
-    optim_epoch = 100
-    batch_size = 1
+    optim_epoch = 10
+    batch_size = 32
     pbar = tqdm(range(optim_epoch))
 
     # Main optimization loop
