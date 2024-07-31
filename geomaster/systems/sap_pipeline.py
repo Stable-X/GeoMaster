@@ -7,8 +7,8 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Adam
 import nvdiffrast.torch as dr
-from geomaster.systems.ncc_utils import build_patch_offset, NCC, SSIM
-from geomaster.systems.mesh_utils import get_normals
+from geomaster.utils.ncc_utils import build_patch_offset, NCC, SSIM
+from geomaster.utils.mesh_utils import get_normals
 from geomaster.models.sap import PSR2Mesh, DPSR, sap_generate, gen_inputs
 import click
 from gaustudio import datasets
