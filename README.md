@@ -65,12 +65,21 @@ data_003/
 Additionally, you should have a reconstructed coarse mesh available.
 
 ## Run GeoMaster
-
-To enhance the geometric detail of your 3D model using GeoMaster, use the `gm-process` command as follows:
+### Using `gm-process`
+To enhance the geometric detail of your 3D model using `gm-process`, use the following command:
 ```bash
 gm-process -s ${INPUT_DIR} -m ${MODEL_DIR}/${MODEL_NAME}.ply
 ```
 Replace `${INPUT_DIR}` with the path to your input data directory, `${MODEL_DIR}` with the path to your model directory, and `${MODEL_NAME}` with the name of your model file.
+
+The enhanced result will be saved as `${MODEL_DIR}/${MODEL_NAME}.refined.ply`.
+
+### Using `gm-process-mesh`
+If you only have the mesh file and do not need to specify an input data directory, you can use the `gm-process-mesh` command:
+```bash
+gm-process-mesh -m ${MODEL_DIR}/${MODEL_NAME}.ply
+```
+Replace `${MODEL_DIR}` with the path to your model directory, and `${MODEL_NAME}` with the name of your model file.
 
 The enhanced result will be saved as `${MODEL_DIR}/${MODEL_NAME}.refined.ply`.
 
@@ -90,7 +99,9 @@ examples/
 
 ### Running GeoMaster
 ```bash
-gm-process -s examples/glt/ -m examples/glt.ply
+gm-process -s examples/glt/ -m examples/glt.ply 
+# or
+gm-process-mesh  -m examples/glt.ply
 ```
 
 After the command executes, the refined model will be available at:
