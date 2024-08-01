@@ -21,7 +21,8 @@ from torch.optim import Adam
 @click.option('--sap_res', default=256, type=int, help='SAP resolution')
 @click.option('--num_sample', default=50000, type=int, help='Number of samples')
 @click.option('--sig', default=2, type=int, help='Sigma value')
-def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: int = 2) -> None:
+@click.option('--refine', default=False, type=bool, help='Whether to refine')
+def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: int = 2, refine: bool =False) -> None:
     # Get original mesh
     gt_vertices, gt_faces = get_mesh(model_path)
     gt_vertices, gt_faces = gt_vertices.cuda(), gt_faces.cuda()
@@ -29,8 +30,6 @@ def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: 
     gt_vertices = gt_vertices.unsqueeze(0)
     gt_normals = get_normals(gt_vertices[:,:,:3], gt_faces.long())
     
-    
-
     # Initialize SAP
     psr2mesh = PSR2Mesh.apply
     dpsr = DPSR((sap_res, sap_res, sap_res), sig).cuda()
@@ -54,82 +53,84 @@ def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: 
                    vertex_normals=normals.detach().cpu().numpy())
     mesh.export(output_path)
     
-    # Generate gt normal map
-    for _id, _camera in enumerate(cameras):
-        _camera = _camera.to("cuda")
-        _w2c = _camera.extrinsics.T
-        _proj = _camera.projection_matrix
-        _pose = _w2c.permute(1, 0).contiguous()
-        resolution = _camera.image_width, _camera.image_height
-        
-        rot_verts = torch.einsum('ijk,ikl->ijl', gt_vertsw, _w2c.unsqueeze(0))
-        proj_verts = torch.einsum('ijk,ikl->ijl', rot_verts, _proj.unsqueeze(0))
-        
-        int32_faces = gt_faces.to(torch.int32)
-        rast_out, _ = dr.rasterize(glctx, proj_verts, int32_faces, resolution=resolution)
-        
-        # render normal
-        feat, _ = dr.interpolate(gt_normals, rast_out, int32_faces)
-        pred_normals = feat.contiguous()
-        pred_normals = dr.antialias(pred_normals, rast_out, proj_verts, int32_faces)
-        pred_normals = F.normalize(pred_normals,p=2,dim=3)
-        norm = torch.norm(pred_normals, p=2, dim=3, keepdim=True)
-        pred_normals = pred_normals / norm
-        pred_mask = norm > 0
-
-        # Convert normal to view space        
-        _camera.normal = _camera.worldnormal2normal(pred_normals[0])
-        # _camera.normal = pred_normals[0]
-        _camera.mask = pred_mask.squeeze(1).squeeze(-1)
-        
-
-    # Distill SAP
-    optim_epoch = 10
-    batch_size = 32
-    pbar = tqdm(range(optim_epoch))
-    num = len(cameras)
-    for i in pbar:
-        perm = torch.randperm(num).cuda()
-        for k in range(0, batch_size):
-            _camera = cameras[perm[k]].to("cuda")
+    # Refine Poisson Mesh
+    if refine:
+        # Generate gt normal map
+        for _id, _camera in enumerate(cameras):
+            _camera = _camera.to("cuda")
             _w2c = _camera.extrinsics.T
             _proj = _camera.projection_matrix
             _pose = _w2c.permute(1, 0).contiguous()
             resolution = _camera.image_width, _camera.image_height
             
-            vertices, faces, _, _, _ = sap_generate(dpsr, psr2mesh, inputs, center, scale)
-            vertsw = torch.cat([vertices, torch.ones_like(vertices[:,0:1])], axis=1).unsqueeze(0)
-            normals = get_normals(vertsw[:,:,:3], faces.long())
-
-            rot_verts = torch.einsum('ijk,ikl->ijl', vertsw, _w2c.unsqueeze(0))
+            rot_verts = torch.einsum('ijk,ikl->ijl', gt_vertsw, _w2c.unsqueeze(0))
             proj_verts = torch.einsum('ijk,ikl->ijl', rot_verts, _proj.unsqueeze(0))
             
-            int32_faces = faces.to(torch.int32)
+            int32_faces = gt_faces.to(torch.int32)
             rast_out, _ = dr.rasterize(glctx, proj_verts, int32_faces, resolution=resolution)
             
             # render normal
-            feat, _ = dr.interpolate(normals, rast_out, int32_faces)
+            feat, _ = dr.interpolate(gt_normals, rast_out, int32_faces)
             pred_normals = feat.contiguous()
             pred_normals = dr.antialias(pred_normals, rast_out, proj_verts, int32_faces)
             pred_normals = F.normalize(pred_normals,p=2,dim=3)
+            norm = torch.norm(pred_normals, p=2, dim=3, keepdim=True)
+            pred_normals = pred_normals / norm
+            pred_mask = norm > 0
 
+            # Convert normal to view space        
+            _camera.normal = _camera.worldnormal2normal(pred_normals[0])
+            # _camera.normal = pred_normals[0]
+            _camera.mask = pred_mask.squeeze(1).squeeze(-1)
             
-            # Compute Normal Loss
-            gt_normal = _camera.normal2worldnormal()
-            # gt_normal = _camera.normal
-            gt_mask = _camera.mask
-            gt_normal_mask = (gt_mask > 0) & (rast_out[0,:,:,3] > 0)
-            normal_error = (1 - (pred_normals * gt_normal).sum(dim=3))       
-            normal_loss =  100 * normal_error[gt_normal_mask].mean()
-            inputs_optimizer.zero_grad()
-            normal_loss.backward()
             
-            #TODO: Fix step
-            # inputs_optimizer.step()
+        optim_epoch = 10
+        batch_size = 32
+        pbar = tqdm(range(optim_epoch))
+        num = len(cameras)
+        for i in pbar:
+            perm = torch.randperm(num).cuda()
+            for k in range(0, batch_size):
+                _camera = cameras[perm[k]].to("cuda")
+                _w2c = _camera.extrinsics.T
+                _proj = _camera.projection_matrix
+                _pose = _w2c.permute(1, 0).contiguous()
+                resolution = _camera.image_width, _camera.image_height
+                
+                vertices, faces, _, _, _ = sap_generate(dpsr, psr2mesh, inputs, center, scale)
+                vertsw = torch.cat([vertices, torch.ones_like(vertices[:,0:1])], axis=1).unsqueeze(0)
+                normals = get_normals(vertsw[:,:,:3], faces.long())
 
-    mesh = Trimesh(vertices=vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), 
-                   vertex_normals=normals.detach().cpu().numpy())
-    mesh.export(output_path)
+                rot_verts = torch.einsum('ijk,ikl->ijl', vertsw, _w2c.unsqueeze(0))
+                proj_verts = torch.einsum('ijk,ikl->ijl', rot_verts, _proj.unsqueeze(0))
+                
+                int32_faces = faces.to(torch.int32)
+                rast_out, _ = dr.rasterize(glctx, proj_verts, int32_faces, resolution=resolution)
+                
+                # render normal
+                feat, _ = dr.interpolate(normals, rast_out, int32_faces)
+                pred_normals = feat.contiguous()
+                pred_normals = dr.antialias(pred_normals, rast_out, proj_verts, int32_faces)
+                pred_normals = F.normalize(pred_normals,p=2,dim=3)
+
+                
+                # Compute Normal Loss
+                gt_normal = _camera.normal2worldnormal().detach()
+                # gt_normal = _camera.normal
+                gt_mask = _camera.mask.detach()
+                gt_normal_mask = (gt_mask > 0) & (rast_out[0,:,:,3] > 0)
+                normal_error = (1 - (pred_normals * gt_normal).sum(dim=3))     
+                normal_loss =  100 * normal_error[gt_normal_mask].mean()
+                inputs_optimizer.zero_grad()
+                normal_loss.backward()
+                # TODO: Fix backward Nan
+                print(inputs.grad)
+                #TODO: Fix step
+                # inputs_optimizer.step()
+
+        mesh = Trimesh(vertices=vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), 
+                    vertex_normals=normals.detach().cpu().numpy())
+        mesh.export(output_path)
     
 if __name__ == "__main__":
     main()
