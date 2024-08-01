@@ -19,6 +19,9 @@ cd GeoMaster
 Install the necessary Python packages specified in the `requirements.txt` file:
 ```bash
 pip install -r requirements.txt
+cd geomaster/utils/libmesh
+python setup.py build_ext --inplace
+cd ../../../
 ```
 
 ### Step 2: Install PyTorch
