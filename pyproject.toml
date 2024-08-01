@@ -19,3 +19,5 @@ exclude = ["tests*"]
 
 [project.scripts]
 gm-process = "geomaster.pipeline:main"
+gm-process-data = "geomaster.scripts.process_data:main"
+gm-process-mesh = "geomaster.scripts.process_mesh:main"

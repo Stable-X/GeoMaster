@@ -7,7 +7,7 @@ import torch_scatter
 import trimesh
 import numpy as np
 
-from geomaster.systems.remesh_utils import calc_edge_length, calc_edges, calc_face_collapses, calc_face_normals, calc_vertex_normals, collapse_edges, flip_edges, pack, prepend_dummies, remove_dummies, split_edges
+from geomaster.utils.remesh_utils import calc_edge_length, calc_edges, calc_face_collapses, calc_face_normals, calc_vertex_normals, collapse_edges, flip_edges, pack, prepend_dummies, remove_dummies, split_edges
 
 @torch.no_grad()
 def remesh(
