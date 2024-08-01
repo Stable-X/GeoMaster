@@ -17,12 +17,14 @@ from torch.optim import Adam
 
 @click.command()
 @click.option('--model_path', '-m', required=True, help='Path to the model')
-@click.option('--output_path', '-o', required=True, help='Path to the output mesh')
+@click.option('--output_path', '-o', help='Path to the output mesh')
 @click.option('--sap_res', default=256, type=int, help='SAP resolution')
 @click.option('--num_sample', default=50000, type=int, help='Number of samples')
 @click.option('--sig', default=2, type=int, help='Sigma value')
 @click.option('--refine', default=False, type=bool, help='Whether to refine')
 def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: int = 2, refine: bool =False) -> None:
+    if output_path is None:
+        output_path = model_path[:-4]+'.refined.ply'
     # Get original mesh
     gt_vertices, gt_faces = get_mesh(model_path)
     gt_vertices, gt_faces = gt_vertices.cuda(), gt_faces.cuda()
