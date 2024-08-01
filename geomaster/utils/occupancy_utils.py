@@ -129,7 +129,7 @@ class TriangleIntersector2d:
         return point_indices, tri_indices
 
     def check_triangles(self, points, triangles):
-        contains = np.zeros(points.shape[0], dtype=np.bool)
+        contains = np.zeros(points.shape[0], dtype=bool)
         A = triangles[:, :2] - triangles[:, 2:]
         A = A.transpose([0, 2, 1])
         y = points - triangles[:, 2]
@@ -186,7 +186,7 @@ def voxelize_interior(mesh, resolution):
     points = (points / resolution - 0.5)
     occ = check_mesh_contains(mesh, points)[0]
     occ = occ.reshape(shape)
-    return occ
+    return points, occ
 
 
 def check_voxel_occupied(occupancy_grid):

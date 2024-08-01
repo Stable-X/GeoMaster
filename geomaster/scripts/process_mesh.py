@@ -19,7 +19,7 @@ import numpy as np
 @click.command()
 @click.option('--model_path', '-m', required=True, help='Path to the model')
 @click.option('--output_path', '-o', help='Path to the output mesh')
-@click.option('--sap_res', default=256, type=int, help='SAP resolution')
+@click.option('--sap_res', default=512, type=int, help='SAP resolution')
 @click.option('--num_sample', default=50000, type=int, help='Number of samples')
 @click.option('--sig', default=2, type=int, help='Sigma value')
 @click.option('--refine', default=False, type=bool, help='Whether to refine')
@@ -139,10 +139,14 @@ def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: 
                     vertex_normals=normals.detach().cpu().numpy())
         mesh.export(output_path)
     if occ:
-        vertices, faces, _, _, _ = sap_generate(dpsr, psr2mesh, inputs, 0, 1)
+        vertices, faces, _, _, _ = sap_generate(dpsr, psr2mesh, inputs, 0, 0.5)
         mesh = Trimesh(vertices=vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy()) # vertices in [-0.5, 0.5]
         sample_points, sample_occ = voxelize_interior(mesh, sap_res) # sample_points in [-0.5, 0.5]
-        np.savez(output_path[:-4]+'.npz', points=sample_points, occupancies=sample_occ)
+        sample_occ = sample_occ.reshape(sample_points.shape[0])
+        pcd = Trimesh(vertices=sample_points[sample_occ], faces=None)
+        pcd.export(model_path[:-4]+'.normalized.fg.ply')
+        
+        np.savez(model_path[:-4]+'.normalized.npz', points=sample_points, occupancies=sample_occ)
         output_normalize_path = model_path[:-4]+'.normalized.ply'
         mesh.export(output_normalize_path)
 
