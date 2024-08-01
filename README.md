@@ -104,12 +104,14 @@ examples/
 ```bash
 gm-process -s examples/glt/ -m examples/glt.ply 
 # or
-gm-process-mesh  -m examples/glt.ply
+gm-process-mesh  -m examples/glt.ply --occ=True
 ```
 
 After the command executes, the refined model will be available at:
 ```
-examples/glt.refined.ply
+examples/glt.refined.ply # watertight mesh
+examples/glt.normalized.ply # normalize mesh to [-0.5, 0.5]
+examples/glt.normalized.npz # sample points and occupancies
 ```
 
 ## Contribution
