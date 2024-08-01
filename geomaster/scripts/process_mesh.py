@@ -7,13 +7,14 @@ from geomaster.models.sap import PSR2Mesh, DPSR, sap_generate
 from geomaster.models.sap import gen_inputs as get_sap
 from geomaster.models.mesh import gen_inputs as get_mesh
 from geomaster.utils.mesh_utils import get_normals
+from geomaster.utils.occupancy_utils import voxelize_interior
 from trimesh import Trimesh
 import nvdiffrast.torch as dr
 import torch.nn.functional as F
 from gaustudio.cameras.camera_paths import get_path_from_orbit
 import torchvision
 from torch.optim import Adam
-
+import numpy as np
 
 @click.command()
 @click.option('--model_path', '-m', required=True, help='Path to the model')
@@ -22,7 +23,8 @@ from torch.optim import Adam
 @click.option('--num_sample', default=50000, type=int, help='Number of samples')
 @click.option('--sig', default=2, type=int, help='Sigma value')
 @click.option('--refine', default=False, type=bool, help='Whether to refine')
-def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: int = 2, refine: bool =False) -> None:
+@click.option('--occ', default=False, type=bool, help='Whether to generate occ')
+def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: int = 2, refine: bool =False, occ: bool = False) -> None:
     if output_path is None:
         output_path = model_path[:-4]+'.refined.ply'
     # Get original mesh
@@ -44,7 +46,6 @@ def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: 
     inputs_optimizer = Adam([{'params': inputs, 'lr': 0.01}])
     
     # Generate camera path
-    from gaustudio.cameras.camera_paths import get_path_from_orbit
     cameras = get_path_from_orbit(center.cpu().numpy(), scale.cpu().numpy() * 1.5, elevation=0)
 
     # Cache SAP output
@@ -137,6 +138,13 @@ def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: 
         mesh = Trimesh(vertices=vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), 
                     vertex_normals=normals.detach().cpu().numpy())
         mesh.export(output_path)
-    
+    if occ:
+        vertices, faces, _, _, _ = sap_generate(dpsr, psr2mesh, inputs, 0, 1)
+        mesh = Trimesh(vertices=vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy()) # vertices in [-0.5, 0.5]
+        sample_points, sample_occ = voxelize_interior(mesh, sap_res) # sample_points in [-0.5, 0.5]
+        np.savez(output_path[:-4]+'.npz', points=sample_points, occupancies=sample_occ)
+        output_normalize_path = model_path[:-4]+'.normalized.ply'
+        mesh.export(output_normalize_path)
+
 if __name__ == "__main__":
     main()
