@@ -43,7 +43,7 @@ def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: 
     
     # Generate camera path
     from gaustudio.cameras.camera_paths import get_path_from_orbit
-    cameras = get_path_from_orbit(center.cpu().numpy(), scale.cpu().numpy() * 3, elevation=15)
+    cameras = get_path_from_orbit(center.cpu().numpy(), scale.cpu().numpy() * 1.5, elevation=0)
 
     # Cache SAP output
     vertices, faces, _, _, _ = sap_generate(dpsr, psr2mesh, inputs, center, scale)
@@ -69,23 +69,30 @@ def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: 
             int32_faces = gt_faces.to(torch.int32)
             rast_out, _ = dr.rasterize(glctx, proj_verts, int32_faces, resolution=resolution)
             
+            # render depth
+            feat = torch.cat([rot_verts[:,:,:3], torch.ones_like(gt_vertsw[:,:,:1]), gt_vertsw[:,:,:3]], dim=2)
+            feat, _ = dr.interpolate(feat, rast_out, int32_faces)
+            rast_verts = feat[:,:,:,:3].contiguous()
+            pred_mask = feat[:,:,:,3:4].contiguous()
+            rast_points = feat[:,:,:,4:7].contiguous()
+            pred_mask = dr.antialias(pred_mask, rast_out, proj_verts, int32_faces).squeeze(-1)
+            
             # render normal
             feat, _ = dr.interpolate(gt_normals, rast_out, int32_faces)
             pred_normals = feat.contiguous()
             pred_normals = dr.antialias(pred_normals, rast_out, proj_verts, int32_faces)
             pred_normals = F.normalize(pred_normals,p=2,dim=3)
-            norm = torch.norm(pred_normals, p=2, dim=3, keepdim=True)
-            pred_normals = pred_normals / norm
-            pred_mask = norm > 0
 
             # Convert normal to view space        
             _camera.normal = _camera.worldnormal2normal(pred_normals[0])
             # _camera.normal = pred_normals[0]
+            torchvision.utils.save_image( (-1 * _camera.normal.permute(2, 0, 1) + 1) / 2, 
+                                         f"out/normal_{_id}.png")
             _camera.mask = pred_mask.squeeze(1).squeeze(-1)
             
             
         optim_epoch = 10
-        batch_size = 32
+        batch_size = 8
         pbar = tqdm(range(optim_epoch))
         num = len(cameras)
         for i in pbar:
@@ -123,10 +130,7 @@ def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: 
                 normal_loss =  100 * normal_error[gt_normal_mask].mean()
                 inputs_optimizer.zero_grad()
                 normal_loss.backward()
-                # TODO: Fix backward Nan
-                print(inputs.grad)
-                #TODO: Fix step
-                # inputs_optimizer.step()
+                inputs_optimizer.step()
 
         mesh = Trimesh(vertices=vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), 
                     vertex_normals=normals.detach().cpu().numpy())
