@@ -7,7 +7,7 @@ from geomaster.models.sap import PSR2Mesh, DPSR, sap_generate
 from geomaster.models.sap import gen_inputs as get_sap
 from geomaster.models.mesh import gen_inputs as get_mesh
 from geomaster.utils.mesh_utils import get_normals
-from geomaster.utils.occupancy_utils import voxelize_interior
+from geomaster.utils.occupancy_utils import check_mesh_contains
 from trimesh import Trimesh
 import nvdiffrast.torch as dr
 import torch.nn.functional as F
@@ -141,14 +141,15 @@ def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: 
     if occ:
         vertices, faces, _, _, _ = sap_generate(dpsr, psr2mesh, inputs, 0, 0.5)
         mesh = Trimesh(vertices=vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy()) # vertices in [-0.5, 0.5]
-        sample_points, sample_occ = voxelize_interior(mesh, sap_res) # sample_points in [-0.5, 0.5]
-        sample_occ = sample_occ.reshape(sample_points.shape[0])
-        pcd = Trimesh(vertices=sample_points[sample_occ], faces=None)
-        pcd.export(model_path[:-4]+'.normalized.fg.ply')
-        
-        np.savez(model_path[:-4]+'.normalized.npz', points=sample_points, occupancies=sample_occ)
         output_normalize_path = model_path[:-4]+'.normalized.ply'
         mesh.export(output_normalize_path)
+        
+        points = np.random.uniform(low=-0.55, high=0.55, size=(100000, 3))
+        sample_points, sample_occ = check_mesh_contains(mesh, points)
+        np.savez(os.path.join(os.path.dirname(model_path), 'points.npz'), points=sample_points, occupancies=sample_occ)
+        
+        surface_points, _ = mesh.sample(100000, return_index=True)
+        np.savez(os.path.join(os.path.dirname(model_path), 'pointcloud.npz'), points=surface_points)
 
 if __name__ == "__main__":
     main()
