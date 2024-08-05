@@ -144,10 +144,11 @@ def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: 
         output_normalize_path = model_path[:-4]+'.normalized.ply'
         mesh.export(output_normalize_path)
         
-        points = np.random.uniform(low=-0.55, high=0.55, size=(100000, 3))
-        sample_points, sample_occ = check_mesh_contains(mesh, points)
+        sample_points = np.random.uniform(low=-0.55, high=0.55, size=(100000, 3))
+        sample_occ = check_mesh_contains(mesh, sample_points)[0]
+        sample_occ = np.packbits(sample_occ.astype(bool))
         np.savez(os.path.join(os.path.dirname(model_path), 'points.npz'), points=sample_points, occupancies=sample_occ)
-        
+
         surface_points, _ = mesh.sample(100000, return_index=True)
         np.savez(os.path.join(os.path.dirname(model_path), 'pointcloud.npz'), points=surface_points)
 
