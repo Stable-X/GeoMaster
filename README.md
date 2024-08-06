@@ -64,50 +64,84 @@ data_003/
 ```
 Additionally, you should have a reconstructed coarse mesh available.
 
-## Run GeoMaster
-### Using `gm-process`
+## Usage
+### Using gm-cull-mesh
+
+To remove invisible or rarely seen vertices from your model, use the following command:
+
+```bash
+gm-cull-mesh -s ${INPUT_DIR} -m ${MODEL_DIR}/${MODEL_NAME}.ply [--min_weights VALUE] [--use_mask]
+```
+
+Replace:
+- `${INPUT_DIR}` with the path to your input data directory
+- `${MODEL_DIR}` with the path to your model directory
+- `${MODEL_NAME}` with the name of your model file
+
+Optional parameters:
+- `--min_weights VALUE`: Set the minimum number of views a vertex must be visible in (default is 5)
+- `--use_mask`: Apply masking during processing
+
+Examples:
+
+1. Culling with minimum weights:
+```bash
+gm-cull-mesh -s examples/glt/ -m examples/glt.ply --min_weights 1
+```
+
+2. Culling with masking:
+```bash
+gm-cull-mesh -s examples/glt/ -m examples/glt.ply --use_mask
+```
+
+3. Culling with both minimum weights and masking:
+```bash
+gm-cull-mesh -s examples/glt/ -m examples/glt.ply --min_weights 5 --use_mask
+```
+
+The culled result will be saved as `${MODEL_DIR}/${MODEL_NAME}.clean.ply`.
+
+Certainly! I'll update the sections for Enhancing and Watertight as well. Here's the revised version of these sections:
+
+
+### Enhancing Mesh with NCC and Normal Loss
+
 To enhance the geometric detail of your 3D model using `gm-process`, use the following command:
+
 ```bash
 gm-process -s ${INPUT_DIR} -m ${MODEL_DIR}/${MODEL_NAME}.ply
 ```
-Replace `${INPUT_DIR}` with the path to your input data directory, `${MODEL_DIR}` with the path to your model directory, and `${MODEL_NAME}` with the name of your model file.
+
+Replace:
+- `${INPUT_DIR}` with the path to your input data directory
+- `${MODEL_DIR}` with the path to your model directory
+- `${MODEL_NAME}` with the name of your model file
+
+Example:
+```bash
+gm-process -s examples/glt/ -m examples/glt.ply
+```
 
 The enhanced result will be saved as `${MODEL_DIR}/${MODEL_NAME}.refined.ply`.
 
-### Using `gm-process-mesh`
-If you only have the mesh file and do not need to specify an input data directory, you can use the `gm-process-mesh` command:
+### Making the Mesh Watertight
+
+If you only have the mesh file and do not need to specify an input data directory, you can use the `gm-process-mesh` command to make the mesh watertight:
+
 ```bash
 gm-process-mesh -m ${MODEL_DIR}/${MODEL_NAME}.ply
 ```
-Replace `${MODEL_DIR}` with the path to your model directory, and `${MODEL_NAME}` with the name of your model file.
 
-The enhanced result will be saved as `${MODEL_DIR}/${MODEL_NAME}.refined.ply`.
+Replace:
+- `${MODEL_DIR}` with the path to your model directory
+- `${MODEL_NAME}` with the name of your model file
 
-## Example
-
-Here is an example of how to run the pipeline:
-
-### Data Preparation Example
-```
-examples/
-    glt/
-        images/
-        mask/
-        sparse/
-    glt.ply
-```
-
-### Running GeoMaster
+Example:
 ```bash
-gm-process -s examples/glt/ -m examples/glt.ply 
-# or
-gm-process-mesh  -m examples/glt.ply
+gm-process-mesh -m examples/glt.ply
 ```
 
-After the command executes, the refined model will be available at:
-```
-examples/glt.refined.ply
-```
+The watertight result will be saved as `${MODEL_DIR}/${MODEL_NAME}.refined.ply`, overwriting the previous refined mesh if it exists.
 
 ## Contribution
 
