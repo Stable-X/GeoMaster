@@ -101,9 +101,6 @@ gm-cull-mesh -s examples/glt/ -m examples/glt.ply --min_weights 5 --use_mask
 
 The culled result will be saved as `${MODEL_DIR}/${MODEL_NAME}.clean.ply`.
 
-Certainly! I'll update the sections for Enhancing and Watertight as well. Here's the revised version of these sections:
-
-
 ### Enhancing Mesh with NCC and Normal Loss
 
 To enhance the geometric detail of your 3D model using `gm-process`, use the following command:
