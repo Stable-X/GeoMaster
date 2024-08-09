@@ -10,3 +10,4 @@ argparse
 pyhocon
 plyfile
 typing_extensions
+diffusers==0.28.0
