@@ -196,12 +196,11 @@ def main(source_path, model_path, output_path, sap_res, sig, num_points, num_sam
 
             ncc_mask = (ncc_values > ncc_thresh) & (src_valid_mask.sum(2) > num_pixels*0.75)
 
-            assert (ncc_values[ncc_mask]<1).all()
-            ncc_values = torch.clamp(ncc_values,max=1.0)
-
-
-            ncc_loss = ncc_weight * torch.sum((torch.ones_like(ncc_values)-ncc_values)*ncc_mask) / ncc_mask.sum()
-
+            if (ncc_values[ncc_mask]<1).all():
+                ncc_loss = ncc_weight * torch.sum((torch.ones_like(ncc_values)-ncc_values)*ncc_mask) / ncc_mask.sum()
+            else:
+                ncc_loss = torch.zeros_like(normal_loss)
+                
             total_loss = ncc_loss + mask_loss + normal_loss
 
             # Optimizer step
