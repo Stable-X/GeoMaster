@@ -49,7 +49,7 @@ def process_delight(image_path, output_delight_dir, input_mask_dir, delight_pred
 @click.option('--images', '-i', default="images", help='Path to the images dir')
 @click.option('--masks', '-m', default="mask", help='Path to the masks dir')
 @click.option('--num_workers', '-w', default=1, help='Number of worker threads')
-@click.option('--threshold', '-t', default=0.3, help='Reflection classification threshold')
+@click.option('--threshold', '-t', default=0.1, help='Reflection classification threshold')
 def main(source_path: str, images: str, masks: str, num_workers: int, threshold: float) -> None:
     torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
     delight_predictor = torch.hub.load("Stable-X/StableDelight", "StableDelight_turbo", trust_repo=True)
