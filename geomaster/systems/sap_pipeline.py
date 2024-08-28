@@ -160,6 +160,25 @@ def main(source_path, model_path, output_path, sap_res, sig, num_points, num_sam
             normal_error = (1 - (pred_normals * gt_normal[..., :3]).sum(dim=3))       
             normal_loss = normal_weight * normal_error[gt_normal_mask].mean()
             
+            # Compute gradients for predicted normals
+            pred_grad_x = pred_normals[:, :, 1:, :] - pred_normals[:, :, :-1, :]
+            pred_grad_y = pred_normals[:, 1:, :, :] - pred_normals[:, :-1, :, :]
+            
+            # Compute gradients for ground truth normals
+            gt_grad_x = gt_normal[:, :, 1:, :3] - gt_normal[:, :, :-1, :3]
+            gt_grad_y = gt_normal[:, 1:, :, :3] - gt_normal[:, :-1, :, :3]
+
+            # Create gradient masks
+            grad_mask_x = gt_normal_mask[:, :, 1:] & gt_normal_mask[:, :, :-1]
+            grad_mask_y = gt_normal_mask[:, 1:, :] & gt_normal_mask[:, :-1, :]
+
+            # Compute gradient errors
+            grad_error_x = F.mse_loss(pred_grad_x[grad_mask_x], gt_grad_x[grad_mask_x], reduction='mean')
+            grad_error_y = F.mse_loss(pred_grad_y[grad_mask_y], gt_grad_y[grad_mask_y], reduction='mean')
+
+            # Compute normal gradient loss
+            normal_grad_loss = normal_weight * (grad_error_x + grad_error_y) / 2
+
             # Compute NCC Loss
             valid_mask = (rast_out[0,:,:,3] > 0) & (ref_mask[0] > 0)
             ref_valid_idx = torch.where(valid_mask)
@@ -201,7 +220,7 @@ def main(source_path, model_path, output_path, sap_res, sig, num_points, num_sam
             else:
                 ncc_loss = torch.zeros_like(normal_loss)
                 
-            total_loss = ncc_loss + mask_loss + normal_loss
+            total_loss = ncc_loss + mask_loss + normal_loss + 10 * normal_grad_loss
 
             # Optimizer step
             inputs_optimizer.zero_grad()
