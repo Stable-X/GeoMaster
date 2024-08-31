@@ -5,6 +5,51 @@ from PIL import Image
 import os
 import numpy as np
 from tqdm import tqdm
+import torch.nn.functional as F
+from torchvision import transforms
+
+def generate_specular(rgb_image, diffuse_image, kernel_size=15, threshold=2):
+    """
+    Generate a specular reflection map by subtracting the diffuse image from the RGB image using PyTorch.
+    
+    :param rgb_image: RGB image as a PIL Image
+    :param diffuse_image: Diffuse image as a PIL Image
+    :param kernel_size: Size of the box kernel for local smoothing
+    :param threshold: Threshold for specular values and normalization
+    :return: specular reflection map as a PIL Image
+    """
+    
+    # Set device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Load and convert images to PyTorch tensors
+    to_tensor = transforms.ToTensor()
+    rgb_tensor = to_tensor(rgb_image).to(device)
+    diffuse_tensor = to_tensor(diffuse_image).to(device)
+
+    # Compute specular tensor
+    specular_tensor = rgb_tensor - diffuse_tensor
+
+    # Clip negative values to 0
+    specular_tensor = torch.clamp(specular_tensor, min=0.0)
+
+    # Apply local smoothing
+    padding = kernel_size // 2
+    specular_smoothed = F.avg_pool2d(specular_tensor, kernel_size, stride=1, padding=padding)
+
+    # Normalize using the threshold
+    specular_normalized = torch.clamp(specular_smoothed / threshold, min=0.0, max=1.0)
+
+    # Convert to grayscale
+    specular_gray = specular_normalized.mean(dim=0, keepdim=True)
+
+    # Convert to 0-255 range
+    specular_uint8 = (specular_gray * 255).permute(1, 2, 0)
+    
+    # Convert to PIL Image
+    specular_image = Image.fromarray(specular_uint8.squeeze().cpu().numpy().astype(np.uint8))
+
+    return specular_image
 
 def classify_reflection(score_image, object_mask=None):
     score_array = torch.tensor(np.asarray(score_image) / 255)
@@ -31,8 +76,8 @@ def process_delight(image_path, output_delight_dir, input_mask_dir, delight_pred
         delight_image = Image.open(output_delight_path)
     
     output_mask_path = os.path.join(output_delight_dir, f"{image_name}_mask.png")
-    score_image = delight_predictor.generate_reflection_score(input_image, delight_image)
-    score_image.save(output_mask_path)
+    specular_image = generate_specular(input_image, delight_image)
+    specular_image.save(output_mask_path)
     
     object_mask_path = os.path.join(input_mask_dir, f"{image_name}.png")
     if os.path.exists(object_mask_path):
@@ -41,7 +86,8 @@ def process_delight(image_path, output_delight_dir, input_mask_dir, delight_pred
         object_mask = None
     
     # Calculate the mean reflection score for the image
-    mean_score = classify_reflection(score_image, object_mask)
+    mean_score = classify_reflection(specular_image, object_mask)
+    print(mean_score)
     return mean_score
         
 @click.command()
