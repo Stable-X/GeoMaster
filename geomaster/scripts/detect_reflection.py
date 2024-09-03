@@ -70,7 +70,7 @@ def process_delight(image_path, output_delight_dir, input_mask_dir, delight_pred
     output_delight_path = os.path.join(output_delight_dir, f"{image_name}.png")
     if not os.path.exists(output_delight_path):
         with torch.inference_mode():
-            delight_image = delight_predictor(input_image, splits_vertical=2, splits_horizontal=2) 
+            delight_image = delight_predictor(input_image, splits_vertical=1, splits_horizontal=1) 
         delight_image.save(output_delight_path)
     else:
         delight_image = Image.open(output_delight_path)
