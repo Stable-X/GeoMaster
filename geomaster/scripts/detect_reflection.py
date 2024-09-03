@@ -70,7 +70,7 @@ def process_delight(image_path, output_delight_dir, input_mask_dir, delight_pred
     output_delight_path = os.path.join(output_delight_dir, f"{image_name}.png")
     if not os.path.exists(output_delight_path):
         with torch.inference_mode():
-            delight_image = delight_predictor(input_image) 
+            delight_image = delight_predictor(input_image, splits_vertical=2, splits_horizontal=2) 
         delight_image.save(output_delight_path)
     else:
         delight_image = Image.open(output_delight_path)
@@ -98,7 +98,8 @@ def process_delight(image_path, output_delight_dir, input_mask_dir, delight_pred
 @click.option('--threshold', '-t', default=0.1, help='Reflection classification threshold')
 def main(source_path: str, images: str, masks: str, num_workers: int, threshold: float) -> None:
     torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
-    delight_predictor = torch.hub.load("Stable-X/StableDelight", "StableDelight_turbo", trust_repo=True)
+    delight_predictor = torch.hub.load("Stable-X/StableDelight", "StableDelight_turbo", 
+                                       trust_repo=True, local_cache_dir='/workspace/code/InverseRendering/StableDiffuse/weights')
     
     input_mask_dir = os.path.join(source_path, masks)
     output_delight_dir = os.path.join(source_path, "delight")
