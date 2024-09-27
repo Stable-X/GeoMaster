@@ -96,7 +96,6 @@ class MeshOptimizer:
         self._remesh_interval = remesh_interval
         self._local_edgelen = local_edgelen
         self._step = 0
-        self._start = time.time()
 
         V = self._vertices.shape[0]
         # prepare continuous tensor for all vertex-based data 
@@ -183,39 +182,14 @@ class MeshOptimizer:
             self._ref_len *= len_change
             self._ref_len.clamp_(*self._edge_len_lims)
 
-    def remesh(self, flip:bool=True, valid_vol=None):
+    def remesh(self, flip:bool=True):
         min_edge_len = self._ref_len * (1 - self._edge_len_tol)
         max_edge_len = self._ref_len * (1 + self._edge_len_tol)
-            
-        self._vertices_etc,self._faces = remesh(self._vertices_etc,self._faces,min_edge_len,max_edge_len,flip)
+        
+        self._vertices_etc,self._faces = remesh(self._vertices_etc,self._faces,min_edge_len,max_edge_len,flip, max_vertices=1e6)
 
-        if valid_vol is not None:
-            resolution = valid_vol.shape[0]
-            vertices_indices = torch.round((self._vertices_etc[:,:3] + 0.5) * (resolution - 1)).long()
-            vertices_valids = torch.zeros(len(vertices_indices)).cuda()
-            # delete the invalid faces         
-            # 1. out of boundary, must all three vertices are in the boundary
-            in_the_box = torch.logical_and(vertices_indices >= 0, vertices_indices < resolution - 1).sum(-1) == 3
-            faces_in_the_box = self._faces[in_the_box[self._faces].sum(dim=-1) == 3]
-            # 2. assert in valid volume, all three vertices are invalid would be considered as invalid
-            vertices_valids[in_the_box] = valid_vol[vertices_indices[:,0][in_the_box], vertices_indices[:,1][in_the_box], vertices_indices[:,2][in_the_box]]
-            faces_valids = vertices_valids[faces_in_the_box].sum(dim=-1) > 0
-            
-            # 3. update faces and vertices
-            # print('faces_valids:', faces_valids.shape)
-            # print('faces_in_the_box:', faces_in_the_box.shape)
-            faces_update = faces_in_the_box[faces_valids]
-            vertices_etc_update, faces_update = self.remove_unreferenced_vertices(self._vertices_etc, faces_update)
-
-            # import trimesh
-            # mesh = trimesh.Trimesh(vertices=vertices_etc_update[:, :3].cpu(), faces=faces_update.cpu())
-            # _ = mesh.export('tmp.obj')
-            self._vertices_etc = vertices_etc_update
-            self._faces = faces_update
-            
         self._split_vertices_etc()
         self._vertices.requires_grad_()
-
         return self._vertices, self._faces
 
 

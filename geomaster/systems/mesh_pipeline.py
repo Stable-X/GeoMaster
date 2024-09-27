@@ -21,6 +21,7 @@ def prepare_data(source_path, resolution=None):
                         "resolution":-1, 
                         "data_device":"cuda", "w_mask": True}
     dataset = datasets.make(dataset_config)
+    dataset.all_cameras = [_camera.downsample_scale(resolution) for _camera in dataset.all_cameras[::3]]
     cameras = dataset.all_cameras
     
     imgs = torch.stack([camera.image for camera in cameras], dim=0).cuda()
@@ -35,27 +36,29 @@ def prepare_data(source_path, resolution=None):
     # load normal
     normals = []
     for camera in cameras:
-        normal_path = str(camera.image_path).replace('images', 'normals')
+        normal_path = str(camera.image_path).replace('images', 'normals')[:-4]+ '.png'
         if os.path.exists(normal_path):
-            _normal = Image.open(normal_path[:-4]+ '.png')
+            _normal = Image.open(normal_path)
             _normal = torch.tensor(np.array(_normal)).cuda().float() / 255 * 2 - 1
             _normal *= -1
             _normal = camera.normal2worldnormal(_normal.cpu())
             
             _normal_norm = torch.norm(_normal, dim=2, keepdim=True)
             _normal_mask = ~((_normal_norm > 1.1) | (_normal_norm < 0.9))
-            _normal = _normal / _normal_norm            
+            _normal = _normal / _normal_norm    
         else:
-            _normal = torch.zeros_like(imgs[0]).cuda()
-            _normal_mask = torch.ones_like(imgs[0][:, :, 0]).cuda().bool()
+            _normal = torch.zeros_like(imgs[0]).cuda().permute(1, 2, 0)
+            _normal_mask = torch.zeros_like(imgs[0][0:1]).cuda().permute(1, 2, 0)
         _normal = torch.cat([_normal, _normal_mask], dim=2)
+        _normal = torch.nn.functional.interpolate(_normal.permute(2, 0, 1).unsqueeze(0), size=(camera.image_height, camera.image_width),
+                                                  mode='bilinear', align_corners=False).squeeze(0).permute(1, 2, 0)
         normals.append(_normal)
     normals = torch.stack(normals, dim=0).cuda().contiguous()
 
     w2cs = torch.stack([camera.extrinsics.T for camera in cameras], dim=0).cuda()
     projs = torch.stack([camera.projection_matrix for camera in cameras], dim=0).cuda()
     poses = w2cs.permute(0, 2, 1).contiguous()
-    return imgs[::3], normals[::3], grayimgs[::3], masks[::3], w2cs[::3], projs[::3], poses[::3], len(imgs[::3])
+    return imgs, normals, grayimgs, masks, w2cs, projs, poses, len(imgs)
     
 @click.command()
 @click.option('--source_path', '-s', type=str, help='Path to dataset')
@@ -65,12 +68,15 @@ def prepare_data(source_path, resolution=None):
 @click.option('--num_sample', default=0, type=int, help='Number of samples')
 @click.option('--h_patch_size', default=5, type=int, help='Patch size')
 @click.option('--ncc_thresh', default=0.5, type=float, help='NCC threshold')
-@click.option('--lr', default=0.1, type=float, help='Learning rate')
+@click.option('--lr', default=0.05, type=float, help='Learning rate')
 @click.option('--ncc_weight', default=0.15, type=float, help='NCC weight')
-@click.option('--normal_weight', default=0.05, type=float, help='NCC weight')
+@click.option('--normal_weight', default=0.5, type=float, help='NCC weight')
 @click.option('--mask_weight', default=0., type=float, help='Mask weight')
 @click.option('--atol', default=0.01, type=float, help='Tolerance level for alignment')
-def main(source_path, model_path, output_path, num_points, num_sample, h_patch_size, ncc_thresh, lr, ncc_weight, normal_weight, mask_weight, atol):
+@click.option('--resolution', '-r', default=1, type=int, help='Resolution')
+def main(source_path, model_path, output_path, num_points, num_sample, h_patch_size, ncc_thresh, lr, ncc_weight, normal_weight, mask_weight, atol, resolution):
+    if model_path is None:
+        model_path = os.path.join(source_path, 'visual_hull.ply')
     if output_path is None:
         output_path = model_path[:-4]+'.refined.ply'
     elif os.path.isdir(output_path):
@@ -78,7 +84,7 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
     num_pixels = (h_patch_size*2+1)**2
 
     # Load sparse
-    imgs, gt_normals, grayimgs, masks, w2cs, projs, poses, num = prepare_data(source_path)
+    imgs, gt_normals, grayimgs, masks, w2cs, projs, poses, num = prepare_data(source_path, resolution)
     _, _, image_height, image_width = imgs.shape
     resolution = (image_height, image_width)
 
@@ -92,15 +98,18 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
     glctx = dr.RasterizeGLContext()
     vertices, faces = gen_inputs(model_path, num_sample)
     vertices, faces = vertices.cuda(), faces.cuda()
-    inputs_optimizer = MeshOptimizer(vertices.detach(), faces.detach(), lr=lr, laplacian_weight=0.05)
+    start_edge_len=0.02
+    end_edge_len=0.005
+    inputs_optimizer = MeshOptimizer(vertices.detach(), faces.detach(), ramp=5, edge_len_lims=(end_edge_len, start_edge_len), 
+                                     local_edgelen=False)
     vertices = inputs_optimizer.vertices
     
     optim_epoch = 100
-    batch_size = 16
+    batch_size = 8
     pbar = tqdm(range(optim_epoch))
 
     # Main optimization loop
-    for i in pbar:
+    for iteration in pbar:
         perm = torch.randperm(num).cuda()
         mean_ncc_loss = 0
         for k in range(0, batch_size):
@@ -149,11 +158,25 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
             mask_loss = mask_weight * F.mse_loss(pred_mask, mask)
             
             # Compute Normal Loss
-            gt_normal_mask = (gt_normal[..., 3] > 0)  & (ref_mask[0] > 0)
-            gt_normal_mask = gt_normal_mask & (rast_out[0,:,:,3] > 0)
-            normal_error = (1 - (pred_normals * gt_normal[..., :3]).sum(dim=3))       
-            normal_loss = normal_weight * normal_error[gt_normal_mask].mean()
-            
+            # Create the mask to identify valid pixels
+            gt_normal_mask = (gt_normal[..., 3] > 0) & (ref_mask[0] > 0)
+            gt_normal_mask = gt_normal_mask & (rast_out[0, :, :, 3] > 0)
+
+            # Compute the normal error
+            normal_error = (1 - (pred_normals * gt_normal[..., :3]).sum(dim=3))
+
+            # Filter the normal error using the gt_normal_mask
+            valid_normal_error = normal_error[gt_normal_mask]
+
+            # Ignore NaN values in the computation of the mean
+            valid_normal_error = valid_normal_error[~torch.isnan(valid_normal_error)]
+
+            # Calculate the mean of the valid normal errors
+            if valid_normal_error.numel() > 0:
+                normal_loss = normal_weight * valid_normal_error.mean()
+            else:
+                normal_loss = torch.tensor(0.0, device=pred_normals.device)  # or any appropriate default value or handling
+                
             # Compute NCC Loss
             valid_mask = (rast_out[0,:,:,3] > 0) & (ref_mask[0] > 0)
             ref_valid_idx = torch.where(valid_mask)
@@ -190,32 +213,32 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
 
             ncc_mask = (ncc_values > ncc_thresh) & (src_valid_mask.sum(2) > num_pixels*0.75)
 
-            assert (ncc_values[ncc_mask]<1).all()
-            ncc_values = torch.clamp(ncc_values,max=1.0)
+            if not (ncc_values[ncc_mask]<1).all():
+                ncc_loss = torch.tensor(0)
+            else:
+                ncc_values = torch.clamp(ncc_values,max=1.0)
+                ncc_loss = ncc_weight * torch.sum((torch.ones_like(ncc_values)-ncc_values)*ncc_mask) / ncc_mask.sum()
 
-
-            ncc_loss = ncc_weight * torch.sum((torch.ones_like(ncc_values)-ncc_values)*ncc_mask) / ncc_mask.sum()
-
-            total_loss = ncc_loss + mask_loss + normal_loss
-            mean_ncc_loss += ncc_loss.item()
+            total_loss = (ncc_loss + mask_loss + normal_loss)/ batch_size
+            mean_ncc_loss += ncc_loss.item() 
             # Optimizer step
             total_loss.backward()
 
         inputs_optimizer.step()
         inputs_optimizer.zero_grad()
+
         # Update progress bar description
-        mean_ncc_loss /= batch_size
         update_pbar_description(pbar, ncc_loss, mask_loss, normal_loss)
         mean_ncc_loss = 0
         vertices, faces = inputs_optimizer.remesh()
         
-    # Save intermediate results
-    with torch.no_grad():
-        np_vertices, np_faces = vertices.detach().cpu().numpy(), faces.detach().cpu().numpy()
-        save_mesh = trimesh.Trimesh(np_vertices, np_faces, process=False, maintain_order=True)
-        save_mesh = clean_mesh(save_mesh, thresh=0.01)
-        
-        save_mesh.export(output_path)
+        if iteration % 10 == 0:
+            # Save intermediate results
+            with torch.no_grad():
+                np_vertices, np_faces = vertices.detach().cpu().numpy(), faces.detach().cpu().numpy()
+                save_mesh = trimesh.Trimesh(np_vertices, np_faces, process=False, maintain_order=True)
+                # save_mesh = clean_mesh(save_mesh, thresh=0.01)
+                save_mesh.export(output_path)
 
 def update_pbar_description(pbar, ncc_loss, mask_loss, sparse_loss):
     des = f'ncc:{ncc_loss.item():.4f} m:{mask_loss.item():.4f} normal:{sparse_loss.item():.4f}'

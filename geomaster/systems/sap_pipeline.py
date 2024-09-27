@@ -21,6 +21,7 @@ def prepare_data(source_path, resolution=None):
                         "resolution":-1, 
                         "data_device":"cuda", "w_mask": True}
     dataset = datasets.make(dataset_config)
+    dataset.all_cameras = [_camera.downsample_scale(resolution) for _camera in dataset.all_cameras]
     cameras = dataset.all_cameras
     
     imgs = torch.stack([camera.image for camera in cameras], dim=0).cuda()
@@ -35,20 +36,22 @@ def prepare_data(source_path, resolution=None):
     # load normal
     normals = []
     for camera in cameras:
-        normal_path = str(camera.image_path).replace('images', 'normals')
+        normal_path = str(camera.image_path).replace('images', 'normals')[:-4]+ '.png'
         if os.path.exists(normal_path):
-            _normal = Image.open(normal_path[:-4]+ '.png')
+            _normal = Image.open(normal_path)
             _normal = torch.tensor(np.array(_normal)).cuda().float() / 255 * 2 - 1
             _normal *= -1
             _normal = camera.normal2worldnormal(_normal.cpu())
             
             _normal_norm = torch.norm(_normal, dim=2, keepdim=True)
             _normal_mask = ~((_normal_norm > 1.1) | (_normal_norm < 0.9))
-            _normal = _normal / _normal_norm            
+            _normal = _normal / _normal_norm    
         else:
             _normal = torch.zeros_like(imgs[0]).cuda().permute(1, 2, 0)
             _normal_mask = torch.zeros_like(imgs[0][0:1]).cuda().permute(1, 2, 0)
         _normal = torch.cat([_normal, _normal_mask], dim=2)
+        _normal = torch.nn.functional.interpolate(_normal.permute(2, 0, 1).unsqueeze(0), size=(camera.image_height, camera.image_width),
+                                                  mode='bilinear', align_corners=False).squeeze(0).permute(1, 2, 0)
         normals.append(_normal)
     normals = torch.stack(normals, dim=0).cuda().contiguous()
 
@@ -72,7 +75,9 @@ def prepare_data(source_path, resolution=None):
 @click.option('--normal_weight', default=1, type=float, help='NCC weight')
 @click.option('--mask_weight', default=0., type=float, help='Mask weight')
 @click.option('--atol', default=0.01, type=float, help='Tolerance level for alignment')
-def main(source_path, model_path, output_path, sap_res, sig, num_points, num_sample, h_patch_size, ncc_thresh, lr, ncc_weight, normal_weight, mask_weight, atol):
+@click.option('--resolution', '-r', default=1, type=int, help='Resolution')
+def main(source_path, model_path, output_path, sap_res, sig, num_points, num_sample, 
+         h_patch_size, ncc_thresh, lr, ncc_weight, normal_weight, mask_weight, atol, resolution):
     if output_path is None:
         output_path = model_path[:-4]+'.refined.ply'
     elif os.path.isdir(output_path):
@@ -80,7 +85,7 @@ def main(source_path, model_path, output_path, sap_res, sig, num_points, num_sam
     num_pixels = (h_patch_size*2+1)**2
 
     # Load sparse
-    imgs, gt_normals, grayimgs, masks, w2cs, projs, poses, num = prepare_data(source_path)
+    imgs, gt_normals, grayimgs, masks, w2cs, projs, poses, num = prepare_data(source_path, resolution)
     _, _, image_height, image_width = imgs.shape
     resolution = (image_height, image_width)
 
@@ -102,7 +107,7 @@ def main(source_path, model_path, output_path, sap_res, sig, num_points, num_sam
     inputs.requires_grad_(True)
     inputs_optimizer = Adam([{'params': inputs, 'lr': lr}])
     optim_epoch = 10
-    batch_size = 32
+    batch_size = 8
     pbar = tqdm(range(optim_epoch))
 
     # Main optimization loop
