@@ -27,57 +27,13 @@ import open3d as o3d
 def main(model_path: str, output_dir: str, sap_res: int, num_sample: int, sig: int = 2) -> None:
     os.makedirs(output_dir, exist_ok=True)
 
-    clean_path = model_path[:-4]+'.clean.ply'
-    logging.info("Cleaning mesh.")
-    ratio_threshold = 0.5
-    mesh = o3d.io.read_triangle_mesh(model_path)
-    
-    print("Analyzing connected components...")
-    (triangle_clusters, 
-    cluster_n_triangles,
-    cluster_area) = mesh.cluster_connected_triangles()
-    
-    print("Finding largest component...") 
-    triangle_clusters = np.array(triangle_clusters)  
-    cluster_n_triangles = np.array(cluster_n_triangles)
-    
-    largest_cluster_idx = cluster_n_triangles.argmax()
-    largest_cluster_n_triangles = cluster_n_triangles[largest_cluster_idx]
-
-    print(f"Largest component has {largest_cluster_n_triangles} triangles")
-    
-    triangles_keep_mask = np.zeros_like(triangle_clusters, dtype=np.int32)
-    saved_clusters = []
-    
-    print("Removing small components...")
-    for i, n_tri in enumerate(cluster_n_triangles):
-        if n_tri > ratio_threshold * largest_cluster_n_triangles:
-            saved_clusters.append(i)
-            triangles_keep_mask += triangle_clusters == i
-            
-    triangles_to_remove = triangles_keep_mask == 0
-    mesh.remove_triangles_by_mask(triangles_to_remove)
-    mesh.remove_unreferenced_vertices()
-    
-    print(f"Removed {triangles_to_remove.sum()} triangles")
-    o3d.io.write_triangle_mesh(clean_path, mesh)
-    model_path = clean_path
-    
-    
     # Get original mesh
-    gt_vertices, gt_faces = get_mesh(model_path)
-    gt_vertices, gt_faces = gt_vertices.cuda(), gt_faces.cuda()
-    gt_vertsw = torch.cat([gt_vertices, torch.ones_like(gt_vertices[:,0:1])], axis=1).unsqueeze(0)
-    gt_vertices = gt_vertices.unsqueeze(0)
-    gt_normals = get_normals(gt_vertices[:,:,:3], gt_faces.long())
-    
-    rotation_matrix = torch.tensor([[1, 0, 0],
-                            [0, 1, 0],
-                            [0, 0, -1]]).to(gt_vertices.device, gt_vertices.dtype)
-    gt_vertices = torch.matmul(gt_vertices, rotation_matrix)
-    gt_normals = torch.matmul(gt_normals, rotation_matrix)
-    
-    
+    # gt_vertices, gt_faces = get_mesh(model_path)
+    # gt_vertices, gt_faces = gt_vertices.cuda(), gt_faces.cuda()
+    # gt_vertsw = torch.cat([gt_vertices, torch.ones_like(gt_vertices[:,0:1])], axis=1).unsqueeze(0)
+    # gt_vertices = gt_vertices.unsqueeze(0)
+    # gt_normals = get_normals(gt_vertices[:,:,:3], gt_faces.long())
+        
     # Initialize SAP
     psr2mesh = PSR2Mesh.apply
     dpsr = DPSR((sap_res, sap_res, sap_res), sig).cuda()
@@ -86,8 +42,6 @@ def main(model_path: str, output_dir: str, sap_res: int, num_sample: int, sig: i
     # Generate input mesh
     inputs, center, scale = get_sap(model_path, num_sample)
     inputs, center, scale = inputs.cuda(), center.cuda(), scale.cuda()
-    inputs.requires_grad_(True)
-    inputs_optimizer = Adam([{'params': inputs, 'lr': 0.01}])
     
     # Cache SAP output
     vertices, faces, _, _, _ = sap_generate(dpsr, psr2mesh, inputs, 0, 0.5)
@@ -95,6 +49,11 @@ def main(model_path: str, output_dir: str, sap_res: int, num_sample: int, sig: i
     normals = get_normals(vertsw[:,:,:3], faces.long())    
     mesh = Trimesh(vertices=vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), 
                    vertex_normals=-normals.detach().cpu().numpy()) # vertices in [-0.5, 0.5]
+    transform = np.eye(4)
+    transform[:3, :3] = [[0, -1, 0], 
+                         [0, 0, 1], 
+                         [-1, 0, 0]]
+    mesh.apply_transform(transform)
     mesh.export(os.path.join(output_dir, 'poisson_mesh.ply'))
     
     from pysdf import SDF
