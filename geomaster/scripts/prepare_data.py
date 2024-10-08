@@ -31,33 +31,32 @@ def process_image(image_path, output_normal_dir, output_mask_dir, normal_predict
 @click.option('--num_workers', '-w', default=4, help='Number of worker threads')
 def main(source_path: str, images: str, masks: str, num_workers: int) -> None:
     torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
-    mask_predictor = torch.hub.load("hugoycj/GenPercept-hub", "GenPercept_Segmentation", trust_repo=True)
-    normal_predictor = torch.hub.load("Stable-X/StableNormal", "StableNormal_turbo", trust_repo=True)
-
+    mask_predictor = torch.hub.load("aim-uofa/GenPercept", "GenPercept_Segmentation", trust_repo=True)
+    # normal_predictor = torch.hub.load("Stable-X/StableNormal", "StableNormal_turbo", trust_repo=True)
+    normal_predictor = None
+    
     output_normal_dir = os.path.join(source_path, "normals")
     output_mask_dir = os.path.join(source_path, masks)
     os.makedirs(output_normal_dir, exist_ok=True)
     os.makedirs(output_mask_dir, exist_ok=True)
 
     image_paths = glob.glob(os.path.join(source_path, images, "*.png")) + \
-                  glob.glob(os.path.join(source_path, images, "*.jpg"))
+                  glob.glob(os.path.join(source_path, images, "*.jpg")) + \
+                  glob.glob(os.path.join(source_path, images, "*.jpeg"))
 
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = [executor.submit(process_image, image_path, output_normal_dir, output_mask_dir, normal_predictor, mask_predictor) 
-                   for image_path in image_paths]
-        
-        for _ in tqdm(as_completed(futures), total=len(futures), desc="Processing images"):
-            pass
+    for image_path in tqdm(image_paths, desc="Processing images"):
+        process_image(image_path, output_normal_dir, output_mask_dir, normal_predictor, mask_predictor)
 
     dataset = datasets.make({
         "name": "colmap", 
         "source_path": source_path, 
-        "masks": 'mask', 
+        "masks": masks, 
         "data_device": "cuda", 
         "w_mask": True
     })
     initializer = initializers.make({"name":"VisualHull", 
-                                     "radius_scale": 2.5})
+                                     "radius_scale": 2.5,
+                                     "resolution": 256})
     pcd = models.make("general_pcd")
     initializer(pcd, dataset)
     
