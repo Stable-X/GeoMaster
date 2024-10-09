@@ -5,9 +5,7 @@ import os
 from tqdm import tqdm
 from geomaster.models.sap import PSR2Mesh, DPSR, sap_generate
 from geomaster.models.sap import gen_inputs as get_sap
-from geomaster.models.mesh import gen_inputs as get_mesh
 from geomaster.utils.mesh_utils import get_normals
-from geomaster.utils.occupancy_utils import check_mesh_contains
 from trimesh import Trimesh
 import nvdiffrast.torch as dr
 import torch.nn.functional as F
