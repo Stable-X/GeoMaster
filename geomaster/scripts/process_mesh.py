@@ -49,6 +49,7 @@ def main(model_path: str, output_dir: str, sap_res: int, num_sample: int, sig: i
     normals = get_normals(vertsw[:,:,:3], faces.long())    
     mesh = Trimesh(vertices=vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), 
                    vertex_normals=-normals.detach().cpu().numpy()) # vertices in [-0.5, 0.5]
+    mesh.invert()
     transform = np.eye(4)
     transform[:3, :3] = [[0, -1, 0], 
                          [0, 0, 1], 
