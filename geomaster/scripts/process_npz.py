@@ -1,22 +1,18 @@
 import click
 import torch
-import glob
 import os
-from tqdm import tqdm
-from geomaster.models.sap import PSR2Mesh, DPSR, sap_generate
-from geomaster.utils.mesh_utils import get_normals
-from geomaster.utils.occupancy_utils import check_mesh_contains
-from trimesh import Trimesh
-import nvdiffrast.torch as dr
-import torch.nn.functional as F
-import torchvision
-from torch.optim import Adam
+import open3d as o3d
 import numpy as np
 import logging
 logging.basicConfig(level=logging.INFO)
-import open3d as o3d
 
-def gen_inputs(npz_file, num_sample=10000):
+def mesh_sap(pcd):
+    from gaustudio.models import ShapeAsPoints
+    sap_pcd = ShapeAsPoints.from_o3d_pointcloud(pcd)
+    mesh = sap_pcd.to_o3d_mesh()
+    return mesh
+
+def gen_inputs(npz_file, num_sample=100000):
     pointcloud = np.load(npz_file)
     surface = np.asarray(pointcloud['points'])
     normal = np.asarray(pointcloud['normals'])
@@ -48,41 +44,29 @@ def gen_inputs(npz_file, num_sample=10000):
     return inputs
 
 @click.command()
-@click.option('--model_path', '-m', required=True, help='Path to the model')
-@click.option('--output_dir', '-o', help='Path to the output mesh')
-@click.option('--sap_res', default=512, type=int, help='SAP resolution')
+@click.option('--model_path', '-m', required=True, help='Path to the input point cloud file')
+@click.option('--output_dir', '-o', default='.', help='Path to the output directory')
 @click.option('--num_sample', default=100000, type=int, help='Number of samples')
-@click.option('--sig', default=2, type=int, help='Sigma value')
-def main(model_path: str, output_dir: str, sap_res: int, num_sample: int, sig: int = 2) -> None:
+def main(model_path: str, output_dir: str, num_sample: int) -> None:
     os.makedirs(output_dir, exist_ok=True)
     
-    # Initialize SAP
-    psr2mesh = PSR2Mesh.apply
-    dpsr = DPSR((sap_res, sap_res, sap_res), sig).cuda()
-    glctx = dr.RasterizeGLContext()
+    # Generate input point cloud
+    inputs = gen_inputs(model_path, num_sample)
 
-    # Generate input mesh
-    inputs = gen_inputs(model_path, num_sample).cuda()
-    inputs.requires_grad_(True)
-    inputs_optimizer = Adam([{'params': inputs, 'lr': 0.01}])
-    
-    # Cache SAP output
-    vertices, faces, _, _, _ = sap_generate(dpsr, psr2mesh, inputs, 0, 1)
-    vertsw = torch.cat([vertices, torch.ones_like(vertices[:,0:1])], axis=1).unsqueeze(0)    
-    normals = get_normals(vertsw[:,:,:3], faces.long())    
-    mesh = Trimesh(vertices=vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), 
-                   vertex_normals=-normals.detach().cpu().numpy()) # vertices in [-0.5, 0.5]
-    mesh.export(os.path.join(output_dir, 'poisson_mesh.ply'))
-    
-    # from pysdf import SDF
-    # f = SDF(vertices.detach().cpu().numpy(), faces.detach().cpu().numpy())
-    # sample_points = np.random.uniform(low=-0.55, high=0.55, size=(100000, 3))
-    # sample_occ = f.contains(sample_points)
-    # sample_occ = np.packbits(sample_occ.astype(bool))
-    # np.savez(os.path.join(output_dir, 'points.npz'), points=sample_points, occupancies=sample_occ)
+    # Convert inputs to numpy array and create Open3D point cloud
+    points = inputs[0, :, :3].cpu().numpy()
+    normals = inputs[0, :, 3:].cpu().numpy()
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points)
+    pcd.normals = o3d.utility.Vector3dVector(normals)
 
-    # surface_points, surface_indices = mesh.sample(100000, return_index=True)
-    # surface_normals = mesh.face_normals[surface_indices]
-    # np.savez(os.path.join(output_dir, 'pointcloud.npz'), points=surface_points, normals=surface_normals)
+    # Convert point cloud to mesh using SAP
+    mesh = mesh_sap(pcd)
+
+    # Save the mesh as poisson_mesh.ply
+    output_path = os.path.join(output_dir, "poisson_mesh.ply")
+    o3d.io.write_triangle_mesh(output_path, mesh)
+    logging.info(f"Mesh saved to {output_path}")
+
 if __name__ == "__main__":
     main()
