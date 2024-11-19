@@ -10,8 +10,11 @@ import numpy as np
 import torch
 import math
 import time
+import json
 from skimage import measure
 from scipy import ndimage
+from gaustudio.datasets import Camera
+
 
 def fov_to_focal(fov, size):
     # convert fov angle in degree to focal
@@ -79,4 +82,18 @@ def build_volumes_projections(extrinsics, intrinsic, resolution=64, size=0.65):
     return us, vs, in_regions
 
 
-
+def get_cameras_from_json(json_path):
+    print("Loading camera data from {}".format(json_path))
+    with open(json_path, 'r') as f:
+        camera_data = json.load(f)
+    intrinsics = []
+    extrinsics = []
+    intrinsics_np = np.array(camera_data["intrinsics"])
+    intrinsics = torch.from_numpy(intrinsics_np).reshape(3, 3)
+    intrinsics = intrinsics.repeat(4, 1, 1)
+    image_size = camera_data.get("image_size", [256, 256])
+    for extrinsics_list in camera_data["extrinsics"]:
+        extrinsics_np = np.array(extrinsics_list)
+        extrinsics.append(torch.from_numpy(extrinsics_np))
+    extrinsics = torch.stack(extrinsics, dim=0)
+    return intrinsics, extrinsics, image_size

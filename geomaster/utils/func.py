@@ -37,7 +37,7 @@ def load_and_split_image(image_path):
     else:
         print(height)
         print(width)
-        raise ValueError("image size should be 512x512, 1024x256 or 768x512¡£")
+        raise ValueError("image size should be 512x512, 1024x256 or 768x512")
 
     
     imgs = [img[y:y+256, x:x+256] for x, y in crop_positions]
