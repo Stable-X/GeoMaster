@@ -88,44 +88,8 @@ def get_cameras_from_json(json_path):
         camera_data = json.load(f)
     intrinsics = []
     extrinsics = []
-    intrinsics_np = np.array(camera_data["intrinsics"])
-    intrinsics = torch.from_numpy(intrinsics_np).reshape(3, 3)
-    intrinsics = intrinsics.repeat(4, 1, 1)
     image_size = camera_data.get("image_size", [256, 256])
-    for extrinsics_list in camera_data["extrinsics"]:
-        extrinsics_np = np.array(extrinsics_list)
-        extrinsics.append(torch.from_numpy(extrinsics_np))
-    extrinsics = torch.stack(extrinsics, dim=0)
+    for extrinsics in camera_data["extrinsics"]:
+        intrinsics.append(torch.from_numpy(camera_data["intrinsics"]))
+        extrinsics.append(torch.from_numpy(extrinsics))
     return intrinsics, extrinsics, image_size
-
-
-def make_round_views(view_nums, additional_elevations, scale=2., device='cuda'):
-    elevations = []
-    w2c = []
-    ortho_scale = scale/2
-    projection = get_ortho_projection_matrix(-ortho_scale, ortho_scale, -ortho_scale, ortho_scale, 0.1, 100)
-    
-    for i in reversed(range(view_nums)):
-        
-        phi_y = 360 / view_nums * (i+1) # 360 ~ 22.5
-        tmp = np.eye(4)
-        rot = R.from_euler('xyz', [0,  phi_y, 0], degrees=True).as_matrix()
-        rot[:, 2] *= -1
-        tmp[:3, :3] = rot
-        tmp[2, 3] = -1.3
-        w2c.append(tmp) 
-        elevations.append(0)
-        for elev in additional_elevations:
-
-            tmp = np.eye(4)
-            rot = R.from_euler('yzx', [phi_y, 0, elev], degrees=True).as_matrix() # up front right 
-            rot[:, 2] *= -1
-            tmp[:3, :3] = rot
-            tmp[2, 3] = -1.3
-            w2c.append(tmp)
-            elevations.append(elev)
-            
-    w2c = torch.from_numpy(np.stack(w2c, 0)).float().to(device=device)
-    projection = torch.from_numpy(projection).float().to(device=device)
-
-    return w2c, projection, elevations
