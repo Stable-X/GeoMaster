@@ -14,7 +14,7 @@ import json
 from skimage import measure
 from scipy import ndimage
 from gaustudio.datasets import Camera
-
+from scipy.spatial.transform import Rotation as R
 
 def fov_to_focal(fov, size):
     # convert fov angle in degree to focal
@@ -99,6 +99,21 @@ def get_cameras_from_json(json_path):
     return intrinsics, extrinsics, image_size
 
 
+def get_ortho_projection_matrix(left, right, bottom, top, near, far):
+    projection_matrix = np.zeros((4, 4), dtype=np.float32)
+
+    projection_matrix[0, 0] = 2.0 / (right - left)
+    projection_matrix[1, 1] = -2.0 / (top - bottom) # add a negative sign here as the y axis is flipped in nvdiffrast output
+    projection_matrix[2, 2] = -2.0 / (far - near)
+
+    projection_matrix[0, 3] = -(right + left) / (right - left)
+    projection_matrix[1, 3] = -(top + bottom) / (top - bottom)
+    projection_matrix[2, 3] = -(far + near) / (far - near)
+    projection_matrix[3, 3] = 1.0
+
+    return projection_matrix
+    
+    
 def make_round_views(view_nums, additional_elevations, scale=2., device='cuda'):
     elevations = []
     w2c = []

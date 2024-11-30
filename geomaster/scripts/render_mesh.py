@@ -5,31 +5,26 @@ import numpy as np
 import trimesh
 from geomaster.utils.remesh_utils import calc_vertex_normals
 from geomaster.utils.camera_utils import make_round_views
-from geomaster.utils.render import nvdiffRenderer
 from scipy.spatial.transform import Rotation
 import multiprocessing as mp
 from functools import partial
 import torch.multiprocessing as tmp
 import queue
 import time
+import nvdiffrast.torch as dr
+from matplotlib import image
+
 
 # ---- Config ----
 scale = 2.5
 res = 512
-num_views = 16          # elevation = 0
+num_round_views = 16   # elevation = 0
 num_elevations = 4
 min_elev = -20
 max_elev = 40
-PROCESSES_PER_GPU = 16  # Number of processes per GPU
+PROCESSES_PER_GPU = 1  # Number of processes per GPU
 
-def prepare_renderer(gpu_id):
-    """Initialize the renderer on a specific GPU."""
-    device = torch.device(f'cuda:{gpu_id}')
-    additional_elevations = np.random.uniform(min_elev, max_elev, num_elevations)
-    mv, proj, ele = make_round_views(num_views, additional_elevations, scale)
-    renderer = nvdiffRenderer(mv, proj, [res, res], device=device)
-    return renderer, mv
-
+    
 def load_processed_ids(log_file):
     """Load the list of already processed IDs from the log file."""
     if not os.path.exists(log_file):
@@ -70,9 +65,6 @@ def process_ply_file(ply_path, gpu_id, output_dir, log_file, process_idx):
     try:
         # Set CUDA device for this process
         torch.cuda.set_device(gpu_id)
-        
-        # Initialize renderer for this process
-        renderer, mv = prepare_renderer(gpu_id)
         device = torch.device(f'cuda:{gpu_id}')
         
         obj_id = os.path.basename(os.path.dirname(ply_path))
@@ -102,10 +94,26 @@ def process_ply_file(ply_path, gpu_id, output_dir, log_file, process_idx):
         torch.cuda.empty_cache()
         
         # Render normals
-        rendered_normals = renderer.render(target_vertices, target_faces, normals=target_normals)
+        additional_elevations = np.random.uniform(min_elev, max_elev, num_elevations)
+        mv, proj, ele = make_round_views(num_round_views, additional_elevations, scale)
+        glctx = dr.RasterizeGLContext()
+        mvp = proj @ mv  # C,4,4
+        vertices = target_vertices
+        faces = target_faces.type(torch.int32)
+        normals = target_normals
+        image_size = [res, res]
+        V = vertices.shape[0]
+        vert_hom = torch.cat((vertices, torch.ones(V,1,device=vertices.device)),axis=-1) #V,3 -> V,4
+        vertices_clip = vert_hom @ mvp.transpose(-2,-1) #C,V,4
+        rast_out,_ = dr.rasterize(glctx, vertices_clip, faces, resolution=image_size, grad_db=False) #C,H,W,4
+        vert_nrm = (normals+1)/2 if normals is not None else colors
+        nrm, _ = dr.interpolate(vert_nrm, rast_out, faces) #C,H,W,3
+        alpha = torch.clamp(rast_out[..., -1:], max=1) #C,H,W,1
+        nrm = torch.concat((nrm,alpha),dim=-1) #C,H,W,4
+        rendered_normals = dr.antialias(nrm, rast_out, vertices_clip, faces) #C,H,W,4
 
-        num_views = mv.shape[0]
-        for i in range(num_views):
+        num_all_views = mv.shape[0]
+        for i in range(num_all_views):
             view_normal = rendered_normals[i]
             
             if view_normal.min() >= 0:
@@ -166,12 +174,10 @@ def main(args):
     # Collect all PLY files
     ply_files = []
     for root, dirs, files in os.walk(args.input_dir):
-        #print(files)
-        if 'poisson_mesh_384.ply' in files:
-            ply_path = os.path.join(root, '.ply')
-            #print(root)
-            #print(files)
-            ply_files.append(ply_path)
+        for file in files:
+            if file.endswith('.ply'):
+                ply_path = os.path.join(root, file)
+                ply_files.append(ply_path)
     
     # Put all tasks in the queue
     for ply_path in ply_files:
