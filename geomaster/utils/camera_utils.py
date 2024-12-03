@@ -14,7 +14,7 @@ import json
 from skimage import measure
 from scipy import ndimage
 from gaustudio.datasets import Camera
-
+from scipy.spatial.transform import Rotation as R
 
 def fov_to_focal(fov, size):
     # convert fov angle in degree to focal
@@ -97,3 +97,50 @@ def get_cameras_from_json(json_path):
         extrinsics.append(torch.from_numpy(extrinsics_np))
     extrinsics = torch.stack(extrinsics, dim=0)
     return intrinsics, extrinsics, image_size
+
+
+def get_ortho_projection_matrix(left, right, bottom, top, near, far):
+    projection_matrix = np.zeros((4, 4), dtype=np.float32)
+
+    projection_matrix[0, 0] = 2.0 / (right - left)
+    projection_matrix[1, 1] = -2.0 / (top - bottom) # add a negative sign here as the y axis is flipped in nvdiffrast output
+    projection_matrix[2, 2] = -2.0 / (far - near)
+
+    projection_matrix[0, 3] = -(right + left) / (right - left)
+    projection_matrix[1, 3] = -(top + bottom) / (top - bottom)
+    projection_matrix[2, 3] = -(far + near) / (far - near)
+    projection_matrix[3, 3] = 1.0
+
+    return projection_matrix
+    
+    
+def make_round_views(view_nums, additional_elevations, scale=2., device='cuda'):
+    elevations = []
+    w2c = []
+    ortho_scale = scale/2
+    projection = get_ortho_projection_matrix(-ortho_scale, ortho_scale, -ortho_scale, ortho_scale, 0.1, 100)
+    
+    for i in reversed(range(view_nums)):
+        
+        phi_y = 360 / view_nums * (i+1) # 360 ~ 22.5
+        tmp = np.eye(4)
+        rot = R.from_euler('xyz', [0,  phi_y, 0], degrees=True).as_matrix()
+        rot[:, 2] *= -1
+        tmp[:3, :3] = rot
+        tmp[2, 3] = -1.3
+        w2c.append(tmp) 
+        elevations.append(0)
+        for elev in additional_elevations:
+
+            tmp = np.eye(4)
+            rot = R.from_euler('yzx', [phi_y, 0, elev], degrees=True).as_matrix() # up front right 
+            rot[:, 2] *= -1
+            tmp[:3, :3] = rot
+            tmp[2, 3] = -1.3
+            w2c.append(tmp)
+            elevations.append(elev)
+            
+    w2c = torch.from_numpy(np.stack(w2c, 0)).float().to(device=device)
+    projection = torch.from_numpy(projection).float().to(device=device)
+
+    return w2c, projection, elevations

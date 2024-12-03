@@ -1,7 +1,7 @@
 tqdm
 click
 setuptools>=42
-numpy
+numpy<=1.9
 opencv-python
 scipy
 scikit-image
@@ -11,3 +11,8 @@ pyhocon
 plyfile
 typing_extensions
 diffusers==0.28.0
+pycolmap
+open3d
+transformers
+PyMCubes
+torch-scatter
