@@ -24,7 +24,10 @@ from torch.optim import Adam
 @click.option('--refine', default=False, type=bool, help='Whether to refine')
 def main(model_path: str, output_path: str, sap_res: int, num_sample: int, sig: int = 2, refine: bool =False) -> None:
     if output_path is None:
-        output_path = model_path[:-4]+'.refined.ply'
+        if model_path.endswith('.refined.ply'):
+            output_path = model_path
+        else:
+            output_path = model_path[:-4] + '.refined.ply'
     # Get original mesh
     gt_vertices, gt_faces = get_mesh(model_path)
     gt_vertices, gt_faces = gt_vertices.cuda(), gt_faces.cuda()
