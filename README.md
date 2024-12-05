@@ -67,18 +67,18 @@ gm-prepare-data -s ./examples/glt
 This command will generate the necessary files and directories for the mesh reconstruction process.
 
 #### Step 2: Reconstruct the mesh
-Next, you can use the `gm-process` command to reconstruct the mesh from the prepared data:
+Next, you can use the `gm-recon` command to reconstruct the mesh from the prepared data:
 
 ```
-gm-process -s ./examples/glt -m ./examples/glt/visual_hull.ply
+gm-recon -s ./examples/glt -m ./examples/glt/visual_hull.ply
 ```
 
 ### Enhancing Mesh
 
-To enhance the geometric detail of your 3D model using `gm-process`, use the following command:
+To enhance the geometric detail of your 3D model using `gm-refine`, use the following command:
 
 ```bash
-gm-process -s ${INPUT_DIR} -m ${MODEL_DIR}/${MODEL_NAME}.ply
+gm-refine -s ${INPUT_DIR} -m ${MODEL_DIR}/${MODEL_NAME}.ply
 ```
 
 Replace:
@@ -88,7 +88,7 @@ Replace:
 
 Example:
 ```bash
-gm-process -s examples/glt/ -m examples/glt.ply
+gm-refine -s examples/glt/ -m examples/glt.ply
 ```
 
 The enhanced result will be saved as `${MODEL_DIR}/${MODEL_NAME}.refined.ply`.
