@@ -65,7 +65,7 @@ def main(source_path: str, images: str, masks: str, num_workers: int) -> None:
     
     highlight_start = "\033[1;32m" 
     highlight_end = "\033[0m"
-    highlighted_command = f"{highlight_start}gm-process -s {source_path} -m {visual_hull_path}{highlight_end}"
+    highlighted_command = f"{highlight_start}gm-recon -s {source_path} -m {visual_hull_path}{highlight_end}"
     print(f"Done. Run {highlighted_command} to get the final result.")
 
 if __name__ == "__main__":
