@@ -98,8 +98,8 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
     glctx = dr.RasterizeGLContext()
     vertices, faces = gen_inputs(model_path, num_sample)
     vertices, faces = vertices.cuda(), faces.cuda()
-    start_edge_len=0.02
-    end_edge_len=0.005
+    start_edge_len=0.1
+    end_edge_len=0.01
     inputs_optimizer = MeshOptimizer(vertices.detach(), faces.detach(), ramp=5, edge_len_lims=(end_edge_len, start_edge_len), 
                                      local_edgelen=False)
     vertices = inputs_optimizer.vertices
