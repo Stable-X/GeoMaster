@@ -14,6 +14,8 @@ import click
 from gaustudio import datasets
 from PIL import Image
 import numpy as np
+import warnings
+
 
 def prepare_data(source_path, resolution=None):
     dataset_config = { "name":"colmap", "source_path": source_path, 
@@ -36,7 +38,7 @@ def prepare_data(source_path, resolution=None):
     # load normal
     normals = []
     for camera in cameras:
-        normal_path = str(camera.image_path).replace('images', 'normals')[:-4]+ '.png'
+        normal_path = str(camera.image_path).replace('images', 'normals').rsplit('.', 1)[0] + '.png'
         if os.path.exists(normal_path):
             _normal = Image.open(normal_path)
             _normal = torch.tensor(np.array(_normal)).cuda().float() / 255 * 2 - 1
@@ -47,6 +49,7 @@ def prepare_data(source_path, resolution=None):
             _normal_mask = ~((_normal_norm > 1.1) | (_normal_norm < 0.9))
             _normal = _normal / _normal_norm    
         else:
+            warnings.warn('Warning: cannot find gt normals')
             _normal = torch.zeros_like(imgs[0]).cuda().permute(1, 2, 0)
             _normal_mask = torch.zeros_like(imgs[0][0:1]).cuda().permute(1, 2, 0)
         _normal = torch.cat([_normal, _normal_mask], dim=2)
@@ -175,6 +178,7 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
             if valid_normal_error.numel() > 0:
                 normal_loss = normal_weight * valid_normal_error.mean()
             else:
+                warnings.warn('Warning: normal_loss is None')
                 normal_loss = torch.tensor(0.0, device=pred_normals.device)  # or any appropriate default value or handling
                 
             # Compute NCC Loss
