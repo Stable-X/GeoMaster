@@ -27,7 +27,6 @@ def save_image(image, save_path, index, mask):
     image_np = image.cpu().numpy()
     mask_np = mask.cpu().numpy().squeeze(-1)
     # Convert from [-1, 1] to [0, 1] range
-    image_np[..., 0] *= -1
     image_np = (image_np + 1) / 2
     image_np[mask_np < 0.5] = 0
     # Convert to uint8
@@ -58,9 +57,7 @@ def aggregate_voxel_features(patch_tokens, uv_coords, device='cuda'):
     # Move inputs to device if needed
     patch_tokens = patch_tokens.to(device)
     uv_coords = uv_coords.to(device)
-    
-    # UV coordinates need to be in range [-1, 1] for grid_sample
-    uv_normalized = uv_coords * 2 - 1
+    uv_normalized = uv_coords
     
     # Process in batches to avoid memory issues
     batch_size = 32
@@ -110,6 +107,14 @@ def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elev
         mesh_name = list(mesh.geometry.keys())[0]
         mesh = mesh.geometry[mesh_name]
 
+    # Check for vertex colors
+    vertex_colors = None
+    if hasattr(mesh, 'visual') and hasattr(mesh.visual, 'vertex_colors'):
+        vertex_colors = mesh.visual.vertex_colors[:, :3].astype(np.float32) / 255.0
+    else:
+        # If no vertex colors present, use a default color (white)
+        vertex_colors = np.ones((len(mesh.vertices), 3), dtype=np.float32)
+
     rotation_matrix = np.array([
         [1, 0, 0],
         [0, 0, 1],
@@ -144,6 +149,9 @@ def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elev
 
     additional_elevations = np.random.uniform(min_elev, max_elev, num_elevations)
     mv, proj, ele = make_round_views(num_round_views, additional_elevations, scale)
+    
+    # Convert vertex colors to tensor
+    vertex_colors = torch.tensor(vertex_colors, dtype=torch.float32, device=device)
     glctx = dr.RasterizeCudaContext()
     mvp = proj @ mv  # C,4,4
 
@@ -155,7 +163,6 @@ def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elev
     for i in range(0, mvp.shape[0], batch_size):
         batch_end = min(i + batch_size, mvp.shape[0])
         batch_mvp = mvp[i:batch_end]  # B,4,4
-        
         # Project points to clip space
         clip_coords = pos_hom @ batch_mvp.transpose(-2, -1)  # B,V,4
         
@@ -174,19 +181,18 @@ def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elev
     vert_hom = torch.cat((vertices, torch.ones(vertices.shape[0], 1, device=vertices.device)), dim=-1)
     vertices_clip = vert_hom @ mvp.transpose(-2, -1)
     rast_out, _ = dr.rasterize(glctx, vertices_clip, faces, resolution=image_size, grad_db=False)
-    vert_nrm = (normals + 1) / 2
+    vert_nrm = normals
     nrm, _ = dr.interpolate(vert_nrm, rast_out, faces)
     alpha = torch.clamp(rast_out[..., -1:], max=1)
     nrm = torch.concat((nrm, alpha), dim=-1)
     rendered_normals = dr.antialias(nrm, rast_out, vertices_clip, faces)
-    rendered_normals = rendered_normals * 2 - 1
     rendered_normals = rendered_normals[..., :3] * rendered_normals[..., 3:]
     rendered_normals = rendered_normals.permute(0, 3, 1, 2)
 
     all_patchtokens = []
     for i in range(0, mvp.shape[0], batch_size):
         batch_end = min(i + batch_size, mvp.shape[0])
-        batch_normals = rendered_normals[i:batch_end]
+        batch_normals = (rendered_normals[i:batch_end] + 1)/2 # [0, 1]
         batch_normals = transform(batch_normals)
         batch_features = dinov2_model(batch_normals, is_training=True)
         batch_patchtokens = batch_features['x_prenorm'][:, dinov2_model.num_register_tokens + 1:].permute(0, 2, 1).reshape(batch_end - i, 1024, n_patch, n_patch)
@@ -194,9 +200,9 @@ def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elev
 
     all_patchtokens = torch.cat(all_patchtokens, dim=0)
     voxel_features = aggregate_voxel_features(all_patchtokens,all_uvs)
+    voxel_normals = aggregate_voxel_features(rendered_normals,all_uvs)
     print(positions.shape, voxel_features.shape, indices.shape)
     print(f"Processed {ply_path} successfully.")
-    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Render a single .ply file.")
