@@ -122,7 +122,7 @@ def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elev
     ])
     transformation_matrix = np.eye(4)
     transformation_matrix[:3, :3] = rotation_matrix
-    mesh.apply_transform(transformation_matrix)
+    inverse_rotation_matrix = transformation_matrix.T
 
     # Voxelization
     mesh_o3d = o3d.geometry.TriangleMesh()
@@ -149,7 +149,9 @@ def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elev
 
     additional_elevations = np.random.uniform(min_elev, max_elev, num_elevations)
     mv, proj, ele = make_round_views(num_round_views, additional_elevations, scale)
-    
+    inverse_rotation_matrix_tensor = torch.tensor(inverse_rotation_matrix, dtype=torch.float32, device=mv.device)
+    mv = mv @ inverse_rotation_matrix_tensor
+
     # Convert vertex colors to tensor
     vertex_colors = torch.tensor(vertex_colors, dtype=torch.float32, device=device)
     glctx = dr.RasterizeCudaContext()
@@ -201,7 +203,17 @@ def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elev
     all_patchtokens = torch.cat(all_patchtokens, dim=0)
     voxel_features = aggregate_voxel_features(all_patchtokens,all_uvs)
     voxel_normals = aggregate_voxel_features(rendered_normals,all_uvs)
-    print(positions.shape, voxel_features.shape, indices.shape)
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    point_cloud = o3d.geometry.PointCloud()
+    point_cloud.points = o3d.utility.Vector3dVector(positions.cpu().numpy())
+    point_cloud.normals = o3d.utility.Vector3dVector(voxel_normals)
+    o3d.io.write_point_cloud(os.path.join(output_dir, 'voxel_points.ply'), point_cloud)
+
+    indices_np = indices.cpu().numpy()
+    indices_np = np.concatenate([np.zeros((indices_np.shape[0], 1)), indices_np], axis=1).astype(np.int32)
+    np.savez(os.path.join(output_dir, 'dino_features.npz'), feats=voxel_features, coords=indices_np)
     print(f"Processed {ply_path} successfully.")
 
 if __name__ == '__main__':
