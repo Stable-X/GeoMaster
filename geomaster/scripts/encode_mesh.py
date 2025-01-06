@@ -9,16 +9,8 @@ import nvdiffrast.torch as dr
 from torchvision import transforms
 import open3d as o3d
 import torch.nn.functional as F
+import click
 
-# load model
-dinov2_model = torch.hub.load(os.path.join(torch.hub.get_dir(), 'facebookresearch_dinov2_main'), 'dinov2_vitl14_reg', source='local',pretrained=True)
-dinov2_model.eval().cuda()
-transform = transforms.Compose([
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-])
-n_patch = 518 // 14
-batch_size = 8
-torch.set_grad_enabled(False)
 
 def save_image(image, save_path, index, mask):
     """Save a single image with the specified index."""
@@ -96,24 +88,37 @@ def aggregate_voxel_features(patch_tokens, uv_coords, device='cuda'):
     
     return voxel_features
 
-def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elevations, min_elev, max_elev, gpu_id):
+@click.command()
+@click.option('--model-path', '-m', required=True, type=str, help="Path to the.ply file to process.")
+@click.option('--output-dir', '-o', required=True, type=str, help="Path to the output directory.")
+@click.option('--scale', '-s', default=1.5, type=float, help="Scale for rendering.")
+@click.option('--res', '-r', default=518, type=int, help="Resolution of the rendered image.")
+@click.option('--num-round-views', '-nrv', default=16, type=int, help="Number of round views.")
+@click.option('--num-elevations', '-ne', default=4, type=int, help="Number of elevation angles.")
+@click.option('--min-elev', '-min', default=-45, type=float, help="Minimum elevation angle.")
+@click.option('--max-elev', '-max', default=45, type=float, help="Maximum elevation angle.")
+@click.option('--gpu-id', '-g', default=0, type=int, help="GPU ID to use for processing. Default is 0.")
+@click.option('--voxel_resolution', '-v', default=64, type=int)
+def main(model_path, output_dir, scale, res, num_round_views, num_elevations, min_elev, max_elev, gpu_id, voxel_resolution):
     # Set device
     device = torch.device(f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu')
 
+    # load model
+    dinov2_model = torch.hub.load(os.path.join(torch.hub.get_dir(), 'facebookresearch_dinov2_main'), 'dinov2_vitl14_reg', source='local',pretrained=True)
+    dinov2_model.eval().to(device)
+    transform = transforms.Compose([
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    n_patch = 518 // 14
+    batch_size = 8
+    torch.set_grad_enabled(False)
+
     # Load and process mesh
-    mesh = trimesh.load(ply_path)
+    mesh = trimesh.load(model_path)
     # Convert scene to mesh if necessary
     if hasattr(mesh, 'geometry'):
         mesh_name = list(mesh.geometry.keys())[0]
         mesh = mesh.geometry[mesh_name]
-
-    # Check for vertex colors
-    vertex_colors = None
-    if hasattr(mesh, 'visual') and hasattr(mesh.visual, 'vertex_colors'):
-        vertex_colors = mesh.visual.vertex_colors[:, :3].astype(np.float32) / 255.0
-    else:
-        # If no vertex colors present, use a default color (white)
-        vertex_colors = np.ones((len(mesh.vertices), 3), dtype=np.float32)
 
     rotation_matrix = np.array([
         [1, 0, 0],
@@ -125,36 +130,37 @@ def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elev
     inverse_rotation_matrix = transformation_matrix.T
 
     # Voxelization
+    vertices_np = np.array(mesh.vertices, dtype=np.float32).clip(-0.5, 0.495)
+
     mesh_o3d = o3d.geometry.TriangleMesh()
-    mesh_o3d.vertices = o3d.utility.Vector3dVector(mesh.vertices)
+    mesh_o3d.vertices = o3d.utility.Vector3dVector(vertices_np)
     mesh_o3d.triangles = o3d.utility.Vector3iVector(mesh.faces)
     voxel_grid = o3d.geometry.VoxelGrid.create_from_triangle_mesh_within_bounds(
         mesh_o3d,
-        voxel_size=1/64,
+        voxel_size=1/voxel_resolution,
         min_bound=(-0.5, -0.5, -0.5),
         max_bound=(0.5, 0.5, 0.5)
     )
     voxel_vertices = np.array([voxel.grid_index for voxel in voxel_grid.get_voxels()])
-    assert np.all(voxel_vertices >= 0) and np.all(voxel_vertices < 64), "Some vertices are out of bounds"
+    print(voxel_vertices.max(), voxel_vertices.min())
+    assert np.all(voxel_vertices >= 0) and np.all(voxel_vertices < voxel_resolution), "Some vertices are out of bounds"
     
-    positions = (voxel_vertices + 0.5) / 64 - 0.5
+    positions = (voxel_vertices + 0.5) / voxel_resolution - 0.5
     positions = torch.from_numpy(positions).float().to(device)
-    indices = ((positions + 0.5) * 64).long()
+    indices = ((positions + 0.5) * voxel_resolution).long()
 
     # Render normals
-    vertices = np.array(mesh.vertices, dtype=np.float32)
-    target_vertices = torch.tensor(vertices, dtype=torch.float32, device=device)
+    target_vertices = torch.tensor(vertices_np, dtype=torch.float32, device=device)
     target_faces = torch.tensor(mesh.faces, dtype=torch.int64, device=device)
     target_normals = calc_vertex_normals(target_vertices, target_faces)
 
     additional_elevations = np.random.uniform(min_elev, max_elev, num_elevations)
-    mv, proj, ele = make_round_views(num_round_views, additional_elevations, scale)
+    mv, proj, ele = make_round_views(num_round_views, additional_elevations, scale, device=device)
     inverse_rotation_matrix_tensor = torch.tensor(inverse_rotation_matrix, dtype=torch.float32, device=mv.device)
     mv = mv @ inverse_rotation_matrix_tensor
 
     # Convert vertex colors to tensor
-    vertex_colors = torch.tensor(vertex_colors, dtype=torch.float32, device=device)
-    glctx = dr.RasterizeCudaContext()
+    glctx = dr.RasterizeCudaContext(device)
     mvp = proj @ mv  # C,4,4
 
     # Calculate UV coordinates using MVP matrix
@@ -214,21 +220,3 @@ def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elev
     indices_np = indices.cpu().numpy()
     indices_np = np.concatenate([np.zeros((indices_np.shape[0], 1)), indices_np], axis=1).astype(np.int32)
     np.savez(os.path.join(output_dir, 'dino_features.npz'), feats=voxel_features, coords=indices_np)
-    print(f"Processed {ply_path} successfully.")
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Render a single .ply file.")
-    parser.add_argument('--model_path', '-m', type=str, required=True, help="Path to the .ply file to process.")
-    parser.add_argument('--output_dir', '-o', type=str, required=False, help="Path to the output directory.")
-    parser.add_argument('--scale', '-s', type=float, default=1.5, help="Scale for rendering.")
-    parser.add_argument('--res', '-r', type=int, default=518, help="Resolution of the rendered image.")
-    parser.add_argument('--num_round_views', '-nrv', type=int, default=16, help="Number of round views.")
-    parser.add_argument('--num_elevations', '-ne', type=int, default=4, help="Number of elevation angles.")
-    parser.add_argument('--min_elev', '-min', type=float, default=-45, help="Minimum elevation angle.")
-    parser.add_argument('--max_elev', '-max', type=float, default=45, help="Maximum elevation angle.")
-    parser.add_argument('--gpu_id', '-g', type=int, default=0, 
-                        help="GPU ID to use for processing. Default is 0.")
-                        
-    args = parser.parse_args()
-    process_ply_file(args.model_path, args.output_dir, args.scale, args.res, args.num_round_views, 
-                     args.num_elevations, args.min_elev, args.max_elev, args.gpu_id)
