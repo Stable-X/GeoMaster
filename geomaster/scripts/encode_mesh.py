@@ -8,6 +8,7 @@ from geomaster.utils.camera_utils import make_round_views
 import nvdiffrast.torch as dr
 from torchvision import transforms
 import open3d as o3d
+import torch.nn.functional as F
 
 # load model
 dinov2_model = torch.hub.load(os.path.join(torch.hub.get_dir(), 'facebookresearch_dinov2_main'), 'dinov2_vitl14_reg', source='local',pretrained=True)
@@ -42,6 +43,61 @@ def save_camera_matrix(matrix, save_path, index):
     full_path = os.path.join(save_path, filename)
     np.save(full_path, matrix.cpu().numpy())
 
+def aggregate_voxel_features(patch_tokens, uv_coords, device='cuda'):
+    """
+    Aggregate features from patch tokens to voxels using UV coordinates
+    
+    Args:
+        patch_tokens: Tensor of shape (num_views, feature_dim, patch_height, patch_width)
+        uv_coords: Tensor of shape (num_views, num_voxels, 2) containing UV coordinates
+        device: Device to process on
+    
+    Returns:
+        voxel_features: numpy array of shape (num_voxels, feature_dim) containing averaged features
+    """
+    # Move inputs to device if needed
+    patch_tokens = patch_tokens.to(device)
+    uv_coords = uv_coords.to(device)
+    
+    # UV coordinates need to be in range [-1, 1] for grid_sample
+    uv_normalized = uv_coords * 2 - 1
+    
+    # Process in batches to avoid memory issues
+    batch_size = 32
+    all_features = []
+    
+    for i in range(0, patch_tokens.shape[0], batch_size):
+        batch_end = min(i + batch_size, patch_tokens.shape[0])
+        
+        # Get current batch
+        batch_tokens = patch_tokens[i:batch_end]  # (B, C, H, W)
+        batch_uv = uv_normalized[i:batch_end]     # (B, V, 2)
+        
+        # Sample features using grid_sample
+        # Need to add an extra dimension for grid_sample
+        sampled_features = F.grid_sample(
+            batch_tokens,
+            batch_uv.unsqueeze(1),  # Add height dimension
+            mode='bilinear',
+            align_corners=False
+        )  # (B, C, 1, V)
+        
+        # Remove extra dimensions and rearrange
+        sampled_features = sampled_features.squeeze(2)  # (B, C, V)
+        sampled_features = sampled_features.permute(0, 2, 1)  # (B, V, C)
+        
+        all_features.append(sampled_features.cpu())
+    
+    # Concatenate all batches
+    all_features = torch.cat(all_features, dim=0)  # (num_views, num_voxels, feature_dim)
+    
+    # Average across views
+    voxel_features = torch.mean(all_features, dim=0).numpy()  # (num_voxels, feature_dim)
+    
+    # Convert to float16 for memory efficiency
+    voxel_features = voxel_features.astype('float16')
+    
+    return voxel_features
 
 def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elevations, min_elev, max_elev, gpu_id):
     # Set device
@@ -137,16 +193,10 @@ def process_ply_file(ply_path, output_dir, scale, res, num_round_views, num_elev
         all_patchtokens.append(batch_patchtokens)
 
     all_patchtokens = torch.cat(all_patchtokens, dim=0)
-
+    voxel_features = aggregate_voxel_features(all_patchtokens,all_uvs)
+    print(positions.shape, voxel_features.shape, indices.shape)
     print(f"Processed {ply_path} successfully.")
     
-    return {
-        'positions': positions,
-        'indices': indices,
-        'uv': all_uvs,
-        'rendered_normals': rendered_normals,
-        'patch_tokens': all_patchtokens
-    }
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Render a single .ply file.")
