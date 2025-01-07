@@ -45,11 +45,12 @@ def halton_sequence(dim, n):
 def hammersley_sequence(dim, n, num_samples):
     return [n / num_samples] + halton_sequence(dim - 1, n)
 
-def sphere_hammersley_sequence(n, num_samples, offset=(0, 0)):
+def sphere_hammersley_sequence(n, num_samples, offset=(0, 0), remap=False):
     u, v = hammersley_sequence(2, n, num_samples)
     u += offset[0] / num_samples
     v += offset[1]
-    u = 2 * u if u < 0.25 else 2 / 3 * u + 1 / 3
+    if remap:
+        u = 2 * u if u < 0.25 else 2 / 3 * u + 1 / 3
     theta = np.arccos(1 - 2 * u) - np.pi / 2
     phi = v * 2 * np.pi
     return [phi, theta]
@@ -127,8 +128,8 @@ def get_cameras_from_json(json_path):
     return intrinsics, extrinsics, image_size
     
 def make_spherical_views(num_views, radius=1.3, min_elevation=-30, max_elevation=30, 
-                        scale=2.0, device='cuda', remap=False, camera_type='ortho',
-                        image_size=(256, 256), fov=49.13):
+                        scale=2.0, device='cuda', camera_type='pinhole',
+                        image_size=(518, 518), fov=40):
     # Generate random offset for Hammersley sequence
     offset = (np.random.rand(), np.random.rand())
     
@@ -140,23 +141,20 @@ def make_spherical_views(num_views, radius=1.3, min_elevation=-30, max_elevation
     if camera_type == 'ortho':
         ortho_scale = scale/2
         projection = get_ortho_projection_matrix(-ortho_scale, ortho_scale, 
-                                               -ortho_scale, ortho_scale, 0.1, 100)
+                                               -ortho_scale, ortho_scale, 0.1, 3)
     elif camera_type == 'pinhole':
-        projection = get_perspective_projection_matrix(fov, image_size[0]/image_size[1], 0.1, 100)
+        projection = get_perspective_projection_matrix(fov, image_size[0]/image_size[1], 0.1, 3)
     else:
         raise ValueError(f"Unsupported camera type: {camera_type}")
     
     # Generate views for each sample point
     for i in range(num_views):
         # Get spherical coordinates using Hammersley sequence
-        phi, theta = sphere_hammersley_sequence(i, num_views, offset=offset, remap=remap)
-        
-        # Map theta to desired elevation range
-        elevation = np.interp(theta, [-np.pi/2, np.pi/2], [min_elevation, max_elevation])
-        
+        yaw, pitch = sphere_hammersley_sequence(i, num_views, offset=offset)
         # Convert spherical coordinates to camera position
         tmp = np.eye(4)
-        rot = R.from_euler('yzx', [np.degrees(phi), 0, elevation], degrees=True).as_matrix()
+        yaw = 360 / num_views * (i+1)
+        rot = R.from_euler('yzx', [yaw, 0, np.degrees(pitch)], degrees=True).as_matrix()
         
         # Flip Z axis to match OpenGL convention
         rot[:, 2] *= -1
@@ -166,7 +164,7 @@ def make_spherical_views(num_views, radius=1.3, min_elevation=-30, max_elevation
         tmp[2, 3] = -radius
         
         w2c.append(tmp)
-        elevations.append(elevation)
+        elevations.append(pitch)
     
     # Convert to torch tensors
     w2c = torch.from_numpy(np.stack(w2c, 0)).float().to(device=device)
