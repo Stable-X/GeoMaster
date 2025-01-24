@@ -10,9 +10,10 @@ from gaustudio import datasets, models
 from gaustudio.pipelines import initializers
 from RealESRGAN import RealESRGAN
 import numpy as np
+import cv2
 
-
-def process_image(image_path, output_normal_dir, output_mask_dir, normal_predictor, mask_predictor, superresolution):
+            
+def process_image(image_path, output_normal_dir, output_mask_dir, output_edge_dir, normal_predictor, mask_predictor, superresolution):
     image_name = os.path.splitext(os.path.basename(image_path))[0]
     input_image = Image.open(image_path)
     
@@ -34,6 +35,12 @@ def process_image(image_path, output_normal_dir, output_mask_dir, normal_predict
         mask = mask_predictor.infer_pil(input_image)
         mask = Image.fromarray(mask)
         mask.save(output_mask_path)
+    
+    output_edge_path = os.path.join(output_edge_dir, f"{image_name}.png")
+    if not os.path.exists(output_edge_path):
+        gray_image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        edges = cv2.Canny(gray_image, 100, 200)
+        cv2.imwrite(output_edge_path, edges)
 
 @click.command()
 @click.option('--source_path', '-s', required=True, help='Path to the dataset')
@@ -48,15 +55,17 @@ def main(source_path: str, images: str, masks: str, num_workers: int, superresol
     
     output_normal_dir = os.path.join(source_path, "normals")
     output_mask_dir = os.path.join(source_path, masks)
+    output_edge_dir = os.path.join(source_path, "edge")
     os.makedirs(output_normal_dir, exist_ok=True)
     os.makedirs(output_mask_dir, exist_ok=True)
+    os.makedirs(output_edge_dir, exist_ok=True)
 
     image_paths = glob.glob(os.path.join(source_path, images, "*.png")) + \
                   glob.glob(os.path.join(source_path, images, "*.jpg")) + \
                   glob.glob(os.path.join(source_path, images, "*.jpeg"))
 
     for image_path in tqdm(image_paths, desc="Processing images"):
-        process_image(image_path, output_normal_dir, output_mask_dir, normal_predictor, mask_predictor)
+        process_image(image_path, output_normal_dir, output_mask_dir, output_edge_dir, normal_predictor, mask_predictor, superresolution)
 
     dataset = datasets.make({
         "name": "colmap", 
