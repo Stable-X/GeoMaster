@@ -76,8 +76,9 @@ def prepare_data(source_path, resolution=None):
 @click.option('--normal_weight', default=0.5, type=float, help='NCC weight')
 @click.option('--mask_weight', default=0., type=float, help='Mask weight')
 @click.option('--atol', default=0.01, type=float, help='Tolerance level for alignment')
-@click.option('--resolution', '-r', default=1, type=int, help='Resolution')
-def main(source_path, model_path, output_path, num_points, num_sample, h_patch_size, ncc_thresh, lr, ncc_weight, normal_weight, mask_weight, atol, resolution):
+@click.option('--start_edge_len', '-sel', default=0.1, type=float, help='edge_len_lims of MeshOptimizer')
+@click.option('--end_edge_len', '-eel', default=0.01, type=float, help='edge_len_lims of MeshOptimizer')
+def main(source_path, model_path, output_path, num_points, num_sample, h_patch_size, ncc_thresh, lr, ncc_weight, normal_weight, mask_weight, atol, resolution, start_edge_len, end_edge_len):
     if model_path is None:
         model_path = os.path.join(source_path, 'visual_hull.ply')
     if output_path is None:
@@ -101,8 +102,6 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
     glctx = dr.RasterizeGLContext()
     vertices, faces = gen_inputs(model_path, num_sample)
     vertices, faces = vertices.cuda(), faces.cuda()
-    start_edge_len=0.1
-    end_edge_len=0.01
     inputs_optimizer = MeshOptimizer(vertices.detach(), faces.detach(), ramp=5, edge_len_lims=(end_edge_len, start_edge_len), 
                                      local_edgelen=False)
     vertices = inputs_optimizer.vertices
@@ -180,6 +179,25 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
             else:
                 warnings.warn('Warning: normal_loss is None')
                 normal_loss = torch.tensor(0.0, device=pred_normals.device)  # or any appropriate default value or handling
+            
+            # Compute gradients for predicted normals
+            pred_grad_x = pred_normals[:, :, 1:, :] - pred_normals[:, :, :-1, :]
+            pred_grad_y = pred_normals[:, 1:, :, :] - pred_normals[:, :-1, :, :]
+            
+            # Compute gradients for ground truth normals
+            gt_grad_x = gt_normal[:, :, 1:, :3] - gt_normal[:, :, :-1, :3]
+            gt_grad_y = gt_normal[:, 1:, :, :3] - gt_normal[:, :-1, :, :3]
+
+            # Create gradient masks
+            grad_mask_x = gt_normal_mask[:, :, 1:] & gt_normal_mask[:, :, :-1]
+            grad_mask_y = gt_normal_mask[:, 1:, :] & gt_normal_mask[:, :-1, :]
+
+            # Compute gradient errors
+            grad_error_x = F.mse_loss(pred_grad_x[grad_mask_x], gt_grad_x[grad_mask_x], reduction='mean')
+            grad_error_y = F.mse_loss(pred_grad_y[grad_mask_y], gt_grad_y[grad_mask_y], reduction='mean')
+
+            # Compute normal gradient loss
+            normal_grad_loss = normal_weight * (grad_error_x + grad_error_y) / 2
                 
             # Compute NCC Loss
             valid_mask = (rast_out[0,:,:,3] > 0) & (ref_mask[0] > 0)
@@ -223,7 +241,7 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
                 ncc_values = torch.clamp(ncc_values,max=1.0)
                 ncc_loss = ncc_weight * torch.sum((torch.ones_like(ncc_values)-ncc_values)*ncc_mask) / ncc_mask.sum()
 
-            total_loss = (ncc_loss + mask_loss + normal_loss)/ batch_size
+            total_loss = (ncc_loss + mask_loss + normal_loss + normal_grad_loss)/ batch_size
             mean_ncc_loss += ncc_loss.item() 
             # Optimizer step
             total_loss.backward()
