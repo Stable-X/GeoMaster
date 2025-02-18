@@ -38,7 +38,17 @@ pip install .
 cd ..
 ```
 
-### Step 4: Install Gaustudio
+### Step 4: Install Real-ESRGAN
+
+Then, Install `Real-ESRGAN`:
+
+```bash
+pip install git+https://github.com/sberbank-ai/Real-ESRGAN.git
+```
+
+And adjust the path: `Geomaster/weights/RealESRGAN_x4.pth`
+
+### Step 5: Install Gaustudio
 
 Finally, install `gaustudio` from its GitHub repository:
 ```bash
