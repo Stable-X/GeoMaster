@@ -16,40 +16,6 @@ from PIL import Image
 import numpy as np
 from geomaster.utils.camera_utils import load_json
 import cv2
-
-
-def save_depth_as_image(depth_tensor, output_dir, prefix, suffix='.png', min_depth=0.0, max_depth=10.0):
-
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    
-    batch_size, height, width = depth_tensor.shape
-    
-    min_depth = torch.min(depth_tensor)
-    max_depth = torch.max(depth_tensor)
-    print(min_depth)
-    print(max_depth)
-    depth_tensor = torch.clamp(depth_tensor, min_depth, max_depth)
-    depth_normalized = (depth_tensor - min_depth) / (max_depth - min_depth)
-    
-    depth_image = (depth_normalized * 255).byte()
-    
-    for i in range(batch_size):
-        single_depth_image = depth_image[i]
-    
-        depth_image_pil = Image.fromarray(single_depth_image.cpu().numpy())
-        
-        filename = os.path.join(output_dir, f"{prefix}_depth_{i}{suffix}")
-        depth_image_pil.save(filename)
-        print(f"Saved depth image {i} to {filename}")
-    
-    
-def normalize_mesh(mesh, max_lim=1.0):
-    center = mesh.vertices.mean(axis=0)
-    scale = np.max(np.linalg.norm(mesh.vertices - center, axis=1))
-    scale = scale / max_lim
-    mesh.vertices = (mesh.vertices - center) / scale
-    return mesh, scale, center
     
 
 def prepare_data(source_path, resolution=None):
@@ -88,6 +54,8 @@ def prepare_data(source_path, resolution=None):
         else:
             print(f"Warning: Edge image not found for {camera.image_path}")
             edge_image = torch.ones_like(grayimgs[0]).cuda()  # Default to all 1s if edge image is missing
+        if resolution and resolution > 0:
+            edge_image = torch.nn.functional.interpolate(edge_image.unsqueeze(0), scale_factor=1.0 / resolution, mode='bilinear', align_corners=False).squeeze(0)
         edges.append(edge_image)
     edges = torch.stack(edges, dim=0).cuda()
         
@@ -127,24 +95,25 @@ def prepare_data(source_path, resolution=None):
 @click.option('--output_path', '-o', type=str, help='Path to model')
 @click.option('--num_points', default=30000, type=int, help='Number of points')
 @click.option('--num_sample', default=0, type=int, help='Number of samples')
-@click.option('--h_patch_size', default=5, type=int, help='Patch size')
+@click.option('--h_patch_size', default=20, type=int, help='Patch size')
 @click.option('--ncc_thresh', default=0.05, type=float, help='NCC threshold')
 @click.option('--lr', default=0.1, type=float, help='Learning rate')
 @click.option('--ncc_weight', default=0.5, type=float, help='NCC weight')
-@click.option('--normal_weight', default=0.15, type=float, help='NCC weight')
-@click.option('--mask_weight', default=0.0, type=float, help='Mask weight')
+@click.option('--normal_weight', default=0.0, type=float, help='Normal weight')
+@click.option('--normal_grad_weight', default=0.5, type=float, help='Normal gradient weight')
+@click.option('--mask_weight', default=0.5, type=float, help='Mask weight')
 @click.option('--atol', default=0.1, type=float, help='Tolerance level for alignment')
 @click.option('--resolution', '-r', default=1, type=int, help='Resolution')
 @click.option('--save_mid', default=0, type=int, help='Save the intermediate results')
 @click.option('--start_edge_len', '-sel', default=0.1, type=float, help='edge_len_lims of MeshOptimizer')
 @click.option('--end_edge_len', '-eel', default=0.01, type=float, help='edge_len_lims of MeshOptimizer')
-def main(source_path, model_path, output_path, num_points, num_sample, h_patch_size, ncc_thresh, lr, ncc_weight, normal_weight, mask_weight, atol, resolution, save_mid, start_edge_len, end_edge_len): 
+def main(source_path, model_path, output_path, num_points, num_sample, h_patch_size, ncc_thresh, lr, ncc_weight, normal_weight, normal_grad_weight, mask_weight, atol, resolution, save_mid, start_edge_len, end_edge_len): 
     if model_path is None:
         model_path = os.path.join(source_path, 'visual_hull.ply') 
     if output_path is None:
-        output_path = model_path[:-4]+f'.v181_{start_edge_len}_{ncc_thresh}_{atol}_{ncc_weight}_{normal_weight}_refined.ply'
+        output_path = model_path[:-4]+f'.refined.ply'
     elif os.path.isdir(output_path):
-        output_path = os.path.join(output_path, os.path.basename(model_path)[:-4]+f'.v181_{start_edge_len}_{ncc_thresh}_{atol}_{ncc_weight}_{normal_weight}_refined.ply')
+        output_path = os.path.join(output_path, os.path.basename(model_path)[:-4]+f'.refined.ply')
     num_pixels = (h_patch_size*2+1)**2
 
     # Load sparse
@@ -234,12 +203,11 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
             pred_normals = dr.antialias(pred_normals, rast_out, proj_verts, int32_faces)
             pred_normals = F.normalize(pred_normals,p=2,dim=3)
             
-            mid_dir = f"{source_path}/mid"
-            if not os.path.exists(mid_dir):
-                os.makedirs(mid_dir)
-            epoch_dir = os.path.join(mid_dir, f"epoch_{iteration}")
-            
             if save_mid:
+                mid_dir = f"{source_path}/mid"
+                if not os.path.exists(mid_dir):
+                    os.makedirs(mid_dir)
+                epoch_dir = os.path.join(mid_dir, f"epoch_{iteration}")
                 if iteration % 99 == 0:
                     if not os.path.exists(epoch_dir):
                         os.makedirs(epoch_dir)
@@ -316,7 +284,7 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
             # Compute gradients for ground truth normals
             gt_grad_x = gt_normal[:, :, 1:, :3] - gt_normal[:, :, :-1, :3]
             gt_grad_y = gt_normal[:, 1:, :, :3] - gt_normal[:, :-1, :, :3]
-
+            
             # Create gradient masks
             grad_mask_x = gt_normal_mask[:, :, 1:] & gt_normal_mask[:, :, :-1]
             grad_mask_y = gt_normal_mask[:, 1:, :] & gt_normal_mask[:, :-1, :]
@@ -329,15 +297,20 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
             edge_mask_x = edge_mask[:, :, :-1]
             edge_mask_y = edge_mask[:, :-1, :]
             
-            grad_mask_x = grad_mask_x & edge_mask_x
-            grad_mask_y = grad_mask_y & edge_mask_y
-
+            # Ensure mask is of type bool for bitwise operations
+            mask_x = (mask[:, :, 1:] > 0) & (mask[:, :, :-1] > 0)
+            mask_y = (mask[:, 1:, :] > 0) & (mask[:, :-1, :] > 0)
+            
+            # Final gradient masks
+            grad_mask_x = grad_mask_x & edge_mask_x & mask_x
+            grad_mask_y = grad_mask_y & edge_mask_y & mask_y
+            
             # Compute gradient errors
             grad_error_x = F.mse_loss(pred_grad_x[grad_mask_x], gt_grad_x[grad_mask_x], reduction='mean')
             grad_error_y = F.mse_loss(pred_grad_y[grad_mask_y], gt_grad_y[grad_mask_y], reduction='mean')
-
+            
             # Compute normal gradient loss
-            normal_grad_loss = normal_weight * (grad_error_x + grad_error_y) / 2
+            normal_grad_loss = normal_grad_weight * (grad_error_x + grad_error_y) / 2
             
             # Compute NCC Loss
             valid_mask = (rast_out[0,:,:,3] > 0) & (ref_mask[0] > 0)
@@ -392,7 +365,7 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
         inputs_optimizer.zero_grad()
 
         # Update progress bar description
-        update_pbar_description(pbar, ncc_loss, mask_loss, normal_loss)
+        update_pbar_description(pbar, ncc_loss, mask_loss, normal_grad_loss)
         mean_ncc_loss = 0
         vertices, faces = inputs_optimizer.remesh()
         if iteration % 10 == 0:
@@ -405,7 +378,7 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
                 save_mesh.export(output_path)
 
 def update_pbar_description(pbar, ncc_loss, mask_loss, sparse_loss):
-    des = f'ncc:{ncc_loss.item():.4f} m:{mask_loss.item():.4f} normal:{sparse_loss.item():.4f}'
+    des = f'ncc:{ncc_loss.item():.4f} m:{mask_loss.item():.4f} normal_grad:{sparse_loss.item():.4f}'
     # des = f'm:{mask_loss.item():.4f} normal:{sparse_loss.item():.4f}'
     pbar.set_description(des)
 

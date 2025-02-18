@@ -24,7 +24,8 @@ def process_image(image_path, output_normal_dir, output_mask_dir, output_edge_di
             sr_model = RealESRGAN("cuda:0", scale=4)
             sr_model.load_weights('weights/RealESRGAN_x4.pth', download=True)
             sr_input_image = sr_model.predict(np.array(input_image).astype(np.uint8))
-            
+        else:
+            sr_input_image = input_image
         normal_image = normal_predictor(sr_input_image, data_type="object")
         # Resize normal_image to a quarter of its original size
         normal_image = normal_image.resize((normal_image.width // 4, normal_image.height // 4))
@@ -50,7 +51,12 @@ def process_image(image_path, output_normal_dir, output_mask_dir, output_edge_di
 @click.option('--superresolution', '-sr', default=1, help='Selector for whether to perform super-resolution processing')
 def main(source_path: str, images: str, masks: str, num_workers: int, superresolution: int) -> None:
     torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
-    mask_predictor = torch.hub.load("aim-uofa/GenPercept", "GenPercept_Segmentation", trust_repo=True)
+    #mask_predictor = torch.hub.load("aim-uofa/GenPercept", "GenPercept_Segmentation", trust_repo=True)
+    import sys
+    local_models_dir = "/home/jiahao/.cache/torch/hub/aim-uofa_GenPercept_main/GenPercept_v1/"
+    sys.path.append(local_models_dir)
+    from gp_hubconf import GenPercept_Segmentation
+    mask_predictor = GenPercept_Segmentation()
     normal_predictor = torch.hub.load("hugoycj/StableNormal", "StableNormal_turbo", trust_repo=True, yoso_version='yoso-normal-v1-8-1')
     
     output_normal_dir = os.path.join(source_path, "normals")
