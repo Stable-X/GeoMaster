@@ -51,12 +51,7 @@ def process_image(image_path, output_normal_dir, output_mask_dir, output_edge_di
 @click.option('--superresolution', '-sr', default=1, help='Selector for whether to perform super-resolution processing')
 def main(source_path: str, images: str, masks: str, num_workers: int, superresolution: int) -> None:
     torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
-    #mask_predictor = torch.hub.load("aim-uofa/GenPercept", "GenPercept_Segmentation", trust_repo=True)
-    import sys
-    local_models_dir = "/home/jiahao/.cache/torch/hub/aim-uofa_GenPercept_main/GenPercept_v1/"
-    sys.path.append(local_models_dir)
-    from gp_hubconf import GenPercept_Segmentation
-    mask_predictor = GenPercept_Segmentation()
+    mask_predictor = torch.hub.load("aim-uofa/GenPercept", "GenPercept_Segmentation", trust_repo=True)
     normal_predictor = torch.hub.load("hugoycj/StableNormal", "StableNormal_turbo", trust_repo=True, yoso_version='yoso-normal-v1-8-1')
     
     output_normal_dir = os.path.join(source_path, "normals")
