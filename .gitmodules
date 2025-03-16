@@ -1,0 +1,3 @@
+[submodule "submodules/PromptDA"]
+	path = submodules/PromptDA
+	url = https://github.com/DepthAnything/PromptDA.git
