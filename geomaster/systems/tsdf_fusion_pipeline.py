@@ -7,7 +7,7 @@ import cv2
 
 from numba import njit, prange
 from skimage import measure
-from PIL import Image as PILImage
+from geomaster.utils.depth_utils import read_depth_meter
 
 try:
     import pycuda.driver as cuda
@@ -456,24 +456,7 @@ def meshwrite_trimesh(filename, verts, faces):
     mesh.export(filename, file_type='ply')
 
 
-def read_depth_meter(depth_path):
-    # Read depth_max from image
-    depth_img = PILImage.open(depth_path)
-    png_info = depth_img.info
-    if "depth_max" in png_info:
-        depth_max = float(png_info["depth_max"])
-    else:
-        raise ValueError("depth_max not found in the PNG metadata!")
-
-    # Read depth image
-    depth_im = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED).astype(float)
-    depth_im = (depth_im / 65535.0) * depth_max
-    depth_im[depth_im >= 5.0] = 0  # set invalid depth to 0 (specific to iphone dataset)
-
-    return depth_im
-
-
-def tsdf_fusion(dataset, output_path):
+def tsdf_fusion(dataset, output_path, depth_dir="depths", vox_size=0.02):
     # ======================================================================================================== #
     # load colmap data from gaustudio
     # ======================================================================================================== #
@@ -504,7 +487,7 @@ def tsdf_fusion(dataset, output_path):
     vol_bnds = np.zeros((3, 2))
     for cam_info in cam_infos:
         image_path = str(cam_info.image_path)
-        depth_path = image_path.replace("/images/", "/depths/").replace(".jpg", ".png")
+        depth_path = image_path.replace("/images/", f"/{depth_dir}/").replace(".jpg", ".png")
         depth_im = read_depth_meter(depth_path)
 
         cam_pose = np.eye(4)
@@ -522,7 +505,7 @@ def tsdf_fusion(dataset, output_path):
     # ======================================================================================================== #
     # Initialize voxel volume
     print("Initializing voxel volume...")
-    tsdf_vol = TSDFVolume(vol_bnds, voxel_size=0.02)  # default 0.02
+    tsdf_vol = TSDFVolume(vol_bnds, voxel_size=vox_size)  # default 0.02
     print("Initialize Success!")
 
     # Loop through RGB-D images and fuse them together

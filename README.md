@@ -10,35 +10,41 @@ To get started with GeoMaster, follow these steps:
 
 First, clone the GeoMaster repository to your local machine:
 ```bash
-git clone https://github.com/hugoycj/GeoMaster.git
+git clone https://github.com/hugoycj/GeoMaster.git --recursive
 cd GeoMaster
 ```
 
-### Step 1: Install Requirements
+### Step 1: Setup the environment
 
-Install the necessary Python packages specified in the `requirements.txt` file:
+Create the geomaster environment using conda:
+
 ```bash
+conda create -n geomaster python=3.9
+conda activate geomaster
+```
+
+### Step 2: Install Requirements
+
+First, navigate to the submodule and install dependencies for submodules:
+
+```bash
+cd submodule/PromptDA
 pip install -r requirements.txt
+pip install -e .
+
+cd ../nvdiffrast
+pip install -e .
 ```
 
-### Step 2: Install PyTorch
+Then, install the dependencies for this project (GeoMaster):
 
-Ensure that your PyTorch version is higher than 1.7.1. You can install the specified version using the following command:
 ```bash
-pip install torch==1.7.1+cu110 torchvision==0.8.2+cu110 torchaudio==0.7.2 -f https://download.pytorch.org/whl/torch_stable.html
+cd ../..
+pip install -r requirements.txt
+pip install -e .
 ```
 
-### Step 3: Install nvdiffrast
-
-Next, install `nvdiffrast` by cloning its repository and running the installation command:
-```bash
-git clone https://github.com/NVlabs/nvdiffrast
-cd nvdiffrast
-pip install .
-cd ..
-```
-
-### Step 4: Install Gaustudio
+### Step 3: Install Gaustudio
 
 Finally, install `gaustudio` from its GitHub repository:
 ```bash
@@ -49,28 +55,36 @@ pip install git+https://github.com/GAP-LAB-CUHK-SZ/gaustudio
 
 Before running GeoMaster, ensure that your data is organized in the following structure:
 ```
-data_001/
-    images/
-    sparse/
+.
+├── confidence  [Optional] Depth confidence maps
+├── depths      [Required] Depth maps
+├── images      [Required] RGB images
+└── sparse      [Required] SfM sparse reconstruction
 ```
-Additionally, you should have a reconstructed coarse mesh available.
-
 ## Usage
 ### Reconstruct Mesh
-#### Step 1: Prepare the data
 First, you need to prepare the input data using the `gm-prepare-data` command:
 
 ```
 gm-prepare-data -s ./examples/glt
 ```
 
-This command will generate the necessary files and directories for the mesh reconstruction process.
-
-#### Step 2: Reconstruct the mesh
-Next, you can use the `gm-recon` command to reconstruct the mesh from the prepared data:
+After running `gm-prepare-data`, the following directory structure with essential files for subsequent mesh enhancing and other operations is generated:
 
 ```
-gm-recon -s ./examples/glt -m ./examples/glt/visual_hull.ply
+.
+├── confidence      	[Optional Input]  Depth confidence maps
+├── depths          	[Required Input]  Raw depth maps
+├── images          	[Required Input]  RGB images
+├── sparse          	[Required Input]  SfM sparse reconstruction
+│
+├── mono_depths     	[Output] Monocular depth estimations
+├── mono_depths_aligned [Output] Aligned monocular depths
+├── normals         	[Output] Surface normal estimations
+│
+├── pc.ply          	[Output] Point cloud representation of the scene
+└── mesh.ply        	[Output] Textured 3D mesh
+└── trimesh.ply     	[Output] Untextured triangulated mesh
 ```
 
 ### Enhancing Mesh
