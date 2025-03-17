@@ -1,3 +1,6 @@
 [submodule "submodules/PromptDA"]
 	path = submodules/PromptDA
 	url = https://github.com/DepthAnything/PromptDA.git
+[submodule "submodules/nvdiffrast"]
+	path = submodules/nvdiffrast
+	url = https://github.com/NVlabs/nvdiffrast
