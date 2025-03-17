@@ -55,28 +55,36 @@ pip install git+https://github.com/GAP-LAB-CUHK-SZ/gaustudio
 
 Before running GeoMaster, ensure that your data is organized in the following structure:
 ```
-data_001
-├── confidence  [optional]
-├── depths      [required]
-├── images      [required]
-└── sparse      [required]
+.
+├── confidence  [Optional] Depth confidence maps
+├── depths      [Required] Depth maps
+├── images      [Required] RGB images
+└── sparse      [Required] SfM sparse reconstruction
 ```
 ## Usage
 ### Reconstruct Mesh
-#### Step 1: Prepare the data
 First, you need to prepare the input data using the `gm-prepare-data` command:
 
 ```
 gm-prepare-data -s ./examples/glt
 ```
 
-This command will generate the necessary files and directories for the mesh reconstruction process.
-
-#### Step 2: Reconstruct the mesh
-Next, you can use the `gm-recon` command to reconstruct the mesh from the prepared data:
+After running `gm-prepare-data`, the following directory structure with essential files for subsequent mesh enhancing and other operations is generated:
 
 ```
-gm-recon -s ./examples/glt -m ./examples/glt/visual_hull.ply
+.
+├── confidence      	[Optional Input]  Depth confidence maps
+├── depths          	[Required Input]  Raw depth maps
+├── images          	[Required Input]  RGB images
+├── sparse          	[Required Input]  SfM sparse reconstruction
+│
+├── mono_depths     	[Output] Monocular depth estimations
+├── mono_depths_aligned [Output] Aligned monocular depths
+├── normals         	[Output] Surface normal estimations
+│
+├── pc.ply          	[Output] Point cloud representation of the scene
+└── mesh.ply        	[Output] Textured 3D mesh
+└── trimesh.ply     	[Output] Untextured triangulated mesh
 ```
 
 ### Enhancing Mesh
