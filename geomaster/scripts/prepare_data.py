@@ -32,7 +32,7 @@ def process_image(image_path, output_normal_dir, output_mask_dir, output_edge_di
         normal_image.save(output_normal_path)
         
     output_mask_path = os.path.join(output_mask_dir, f"{image_name}.png")
-    if not os.path.exists(output_mask_path):
+    if not os.path.exists(output_mask_path) and mask_predictor is not None:
         mask = mask_predictor.infer_pil(input_image)
         mask = Image.fromarray(mask)
         mask.save(output_mask_path)
@@ -51,12 +51,8 @@ def process_image(image_path, output_normal_dir, output_mask_dir, output_edge_di
 @click.option('--superresolution', '-sr', default=1, help='Selector for whether to perform super-resolution processing')
 def main(source_path: str, images: str, masks: str, num_workers: int, superresolution: int) -> None:
     torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
-    #mask_predictor = torch.hub.load("aim-uofa/GenPercept", "GenPercept_Segmentation", trust_repo=True)
-    import sys
-    local_models_dir = "/home/jiahao/.cache/torch/hub/aim-uofa_GenPercept_main/GenPercept_v1/"
-    sys.path.append(local_models_dir)
-    from gp_hubconf import GenPercept_Segmentation
-    mask_predictor = GenPercept_Segmentation()
+
+    mask_predictor = torch.hub.load("aim-uofa/GenPercept", "GenPercept_Segmentation", trust_repo=True)
     normal_predictor = torch.hub.load("hugoycj/StableNormal", "StableNormal_turbo", trust_repo=True, yoso_version='yoso-normal-v1-8-1')
     
     output_normal_dir = os.path.join(source_path, "normals")
@@ -80,6 +76,7 @@ def main(source_path: str, images: str, masks: str, num_workers: int, superresol
         "data_device": "cuda", 
         "w_mask": True
     })
+
     initializer = initializers.make({"name":"VisualHull", 
                                      "radius_scale": 2.5,
                                      "resolution": 256})
@@ -93,6 +90,7 @@ def main(source_path: str, images: str, masks: str, num_workers: int, superresol
     highlight_end = "\033[0m"
     highlighted_command = f"{highlight_start}gm-refine -s {source_path} -m {visual_hull_path}{highlight_end}"
     print(f"Done. Run {highlighted_command} to get the final result.")
+
 
 if __name__ == "__main__":
     main()
