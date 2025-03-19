@@ -5,7 +5,7 @@
 #
 # https://github.com/apple/ml-direct2.5/blob/main/util/camera_utils.py
 
-
+import os
 import numpy as np
 import torch
 import math
@@ -120,12 +120,64 @@ def get_cameras_from_json(json_path):
     intrinsics_np = np.array(camera_data["intrinsics"])
     intrinsics = torch.from_numpy(intrinsics_np).reshape(3, 3)
     intrinsics = intrinsics.repeat(4, 1, 1)
-    image_size = camera_data.get("image_size", [256, 256])
+    image_size = camera_data.get("image_size", [256*4, 256*4])
     for extrinsics_list in camera_data["extrinsics"]:
         extrinsics_np = np.array(extrinsics_list)
         extrinsics.append(torch.from_numpy(extrinsics_np))
     extrinsics = torch.stack(extrinsics, dim=0)
     return intrinsics, extrinsics, image_size
+
+
+def load_json(json_path):
+    source_path = os.path.dirname(json_path)
+    
+    intrinsics, extrinsics, image_size = get_cameras_from_json(json_path)
+
+    camera_list = []
+    for i, extrinsics_matrix in enumerate(extrinsics):
+        
+        image_name = i+1
+        fx = intrinsics[i, 0, 0]
+        fy = intrinsics[i, 1, 1]
+        position = np.array(extrinsics_matrix[:3, 3])
+        rotation = np.array(extrinsics_matrix[:3, :3])
+        W2C = np.eye(4)
+        W2C[:3, :3] = rotation
+        W2C[:3, 3] = position
+        Rt = np.linalg.inv(W2C)
+        
+        rotation = Rt[:3, :3]
+        position = Rt[:3, 3]
+        
+        R = rotation.transpose()
+        T = position
+
+        camera = Camera(
+            image_path=os.path.join(source_path, f"images/{image_name}.png"),
+            image_width=image_size[0],
+            image_height=image_size[1],
+            R=R,
+            T=T,
+            FoVx=focal_to_fov(fx, image_size[0]),
+            FoVy=focal_to_fov(fy, image_size[1])
+        )
+        camera.update_intrinsics(intrinsics[i], image_size[0], image_size[1])
+        extrinsics_matrix = convert_blender_extrinsics_to_opencv(np.array(extrinsics_matrix))
+        # convert opencv to geomaster
+        flip_matrix = np.array([  
+            [1,  0,  0, 0],
+            [0, -1,  0, 0],
+            [0,  0,  1, 0],
+            [0,  0,  0, 1]
+        ])
+        extrinsics_matrix_h = np.eye(4)
+        extrinsics_matrix_h[:3, :] = extrinsics_matrix
+        extrinsics_matrix_h = flip_matrix @ extrinsics_matrix_h
+        extrinsics_matrix = extrinsics_matrix_h[:3, :]
+        camera.extrinsics = np.array(extrinsics_matrix)
+         
+        camera_list.append(camera)
+    return camera_list
     
 def make_spherical_views(num_views, radius=1.3, min_elevation=-30, max_elevation=30, 
                         scale=2.0, device='cuda', camera_type='pinhole',
