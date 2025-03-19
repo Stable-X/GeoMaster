@@ -169,15 +169,7 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
             gt_normal = torch.cat([ref_normal, src_normal])
             mask = torch.cat([ref_mask, src_mask])
             n = w2c.shape[0]
-#            b = gt_normal.shape[0]
-#            for i in range(b):
-#                gt_normals_cpu = gt_normal[i].detach().cpu().numpy()
-#                gt_normals_rgb = (gt_normals_cpu + 1.0) / 2.0 * 255
-#                gt_normals_rgb = gt_normals_rgb.astype(np.uint8)
-#                gt_normals_path = os.path.join(f"gt_normals_{i}.png")
-#                gt_normals_rgb_image = Image.fromarray(gt_normals_rgb)
-#                gt_normals_rgb_image.save(gt_normals_path)
-#            return
+
             # SAP generation
             vertsw = torch.cat([vertices, torch.ones_like(vertices[:,0:1])], axis=1).unsqueeze(0).expand(n,-1,-1)
             # vertsw = torch.cat([normalized_vertices, torch.ones_like(normalized_vertices[:,0:1])], axis=1).unsqueeze(0).expand(n,-1,-1)
@@ -240,15 +232,6 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
             # Create the mask to identify valid pixels
             gt_normal_mask = (gt_normal[..., 3] > 0) & (ref_mask[0] > 0)
             
-#            num_zeros = torch.sum(gt_normal_mask == 0).item()
-#            num_ones = torch.sum(gt_normal_mask != 0).item()           
-#            print(gt_normal_mask.shape)
-#            print(f"Number of 0s: {num_zeros}")
-#            print(f"Number of 1s: {num_ones}")
-#            non_zero_values = gt_normal_mask[gt_normal_mask != 0]
-#            print("Non-zero values in src_mask:")
-#            print(non_zero_values)
-            
             gt_normal_mask = gt_normal_mask & (rast_out[0, :, :, 3] > 0)
 
             # Compute the normal error
@@ -259,23 +242,57 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
             
             # Ignore NaN values in the computation of the mean
             valid_normal_error = valid_normal_error[~torch.isnan(valid_normal_error)]
-
+            
+            if len(valid_normal_error) > 0:
+                normal_error_threshold = torch.median(valid_normal_error)*10
+            else:
+                normal_error_threshold = 1.0
+            static_mask = normal_error > normal_error_threshold
+            dynamic_mask = ~static_mask & gt_normal_mask
+            valid_normal_error = normal_error[dynamic_mask]
+            valid_normal_error = valid_normal_error[~torch.isnan(valid_normal_error)]
+            
             # Calculate the mean of the valid normal errors
             if valid_normal_error.numel() > 0:
                 normal_loss = normal_weight * valid_normal_error.mean()
             else:
-                
                 print('valid_normal_error.numel() = 0')
-                return
-                num_zeros = torch.sum(rast_out[0, :, :, 3] == 0).item()
-                num_ones = torch.sum(rast_out[0, :, :, 3] != 0).item()
-                print(rast_out[0, :, :, 3].shape)
-                print(f"Number of 0s: {num_zeros}")
-                print(f"Number of 1s: {num_ones}")
-                non_zero_values = rast_out[0, :, :, 3][rast_out[0, :, :, 3] != 0]
-                print("Non-zero values in src_mask:")
-                print(non_zero_values)
                 normal_loss = torch.tensor(0.0, device=pred_normals.device)  # or any appropriate default value or handling
+            
+            # Compute gradients for predicted normals
+            pred_grad_x = pred_normals[:, :, 1:, :] - pred_normals[:, :, :-1, :]
+            pred_grad_y = pred_normals[:, 1:, :, :] - pred_normals[:, :-1, :, :]
+            
+            # Compute gradients for ground truth normals - fix dimension mismatch
+            gt_grad_x = gt_normal[:, :, 1:, :3] - gt_normal[:, :, :-1, :3]
+            gt_grad_y = gt_normal[:, 1:, :, :3] - gt_normal[:, :-1, :, :3]  # Keep :3 for both tensors
+            
+            # Calculate gradient magnitudes
+            pred_grad_mag_x = torch.norm(pred_grad_x, dim=3)
+            pred_grad_mag_y = torch.norm(pred_grad_y, dim=3)
+            gt_grad_mag_x = torch.norm(gt_grad_x, dim=3)
+            gt_grad_mag_y = torch.norm(gt_grad_y, dim=3)
+            
+            # Calculate adaptive threshold based on predicted gradient statistics
+            valid_pred_grads = torch.cat([pred_grad_mag_x[gt_normal_mask[:, :, 1:]], 
+                                        pred_grad_mag_y[gt_normal_mask[:, 1:, :]]])
+            if len(valid_pred_grads) > 0:
+                small_grad_threshold = torch.median(valid_pred_grads) * 0.2
+            else:
+                small_grad_threshold = 0.01  # fallback value
+            
+            # Create mask for regions where both predicted and ground truth gradients are small
+            small_grad_x = (pred_grad_mag_x < small_grad_threshold) & (gt_grad_mag_x < small_grad_threshold)
+            small_grad_y = (pred_grad_mag_y < small_grad_threshold) & (gt_grad_mag_y < small_grad_threshold)
+            
+            # Expand small_grad masks to match original image size
+            small_grad_mask = torch.zeros_like(static_mask, dtype=torch.bool)
+            small_grad_mask[:, :, :-1] |= small_grad_x
+            small_grad_mask[:, :-1, :] |= small_grad_y
+            
+            # Update static_mask to include areas with small gradients
+            static_mask = static_mask | small_grad_mask
+            dynamic_mask = ~static_mask & gt_normal_mask
             
             # Compute gradients for predicted normals
             pred_grad_x = pred_normals[:, :, 1:, :] - pred_normals[:, :, :-1, :]
@@ -313,7 +330,7 @@ def main(source_path, model_path, output_path, num_points, num_sample, h_patch_s
             normal_grad_loss = normal_grad_weight * (grad_error_x + grad_error_y) / 2
             
             # Compute NCC Loss
-            valid_mask = (rast_out[0,:,:,3] > 0) & (ref_mask[0] > 0)
+            valid_mask = (rast_out[0,:,:,3] > 0) & (ref_mask[0] > 0) & dynamic_mask[0]
             ref_valid_idx = torch.where(valid_mask)
             rand_idx = torch.randperm(len(ref_valid_idx[0]))
             ref_idx = [item[rand_idx][:num_points] for item in ref_valid_idx] # part sample
